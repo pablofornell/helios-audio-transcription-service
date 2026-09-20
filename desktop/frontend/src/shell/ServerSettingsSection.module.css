@@ -1,0 +1,62 @@
+.hint {
+  margin: 0 0 var(--space-3);
+  font-size: var(--fs-200);
+  color: var(--text-tertiary);
+}
+
+/* --st-running (amber), not --st-failed: a discarded saved value is worth
+   noticing, not an error on a par with a failed save (.saveError below). */
+.warning {
+  margin: 0 0 var(--space-3);
+  font-size: var(--fs-200);
+  color: var(--st-running);
+}
+
+.row {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+.hostField {
+  flex: 1;
+  min-width: 0;
+}
+
+.portField {
+  width: 96px;
+  flex-shrink: 0;
+}
+
+.effectiveURL {
+  margin: var(--space-2) 0 0;
+  font-size: var(--fs-200);
+  color: var(--text-tertiary);
+}
+
+.effectiveURLValue {
+  color: var(--text-secondary);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.testOK {
+  font-size: var(--fs-200);
+  color: var(--st-succeeded);
+}
+
+.testFailed {
+  font-size: var(--fs-200);
+  color: var(--st-failed);
+}
+
+.saveError {
+  margin: var(--space-2) 0 0;
+  font-size: var(--fs-200);
+  color: var(--st-failed);
+}

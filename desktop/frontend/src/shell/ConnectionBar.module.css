@@ -1,0 +1,39 @@
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  height: var(--connbar-h);
+  padding: 0 var(--space-3);
+  background: var(--st-running-tint);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-200);
+  color: var(--text-primary);
+  animation: connbar-in var(--dur-base) var(--ease-standard);
+  flex-shrink: 0;
+}
+
+@keyframes connbar-in {
+  from {
+    height: 0;
+    opacity: 0;
+  }
+  to {
+    height: var(--connbar-h);
+    opacity: 1;
+  }
+}
+
+.bar.success {
+  background: var(--st-succeeded-tint);
+}
+
+.message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.countdown {
+  color: var(--text-tertiary);
+}

@@ -15,6 +15,18 @@ deploy/.env
 /models/
 *.bin
 
+# Desktop app: Node / frontend build output
+desktop/frontend/dist/
+desktop/frontend/node_modules/
+# Wails writes this md5 of package.json to decide whether to re-run
+# npm install. Build cache, not source.
+desktop/frontend/package.json.md5
+
+# Desktop app: Wails build output (binaries, platform scaffolding wails
+# init/build generate locally -- mirrors the sibling ingestion service's
+# desktop/.gitignore, which keeps this out of version control entirely)
+desktop/build/
+
 # Editor / OS cruft
 .idea/
 .vscode/

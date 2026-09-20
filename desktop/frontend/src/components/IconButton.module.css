@@ -1,0 +1,55 @@
+.button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: default;
+  transition: background-color var(--dur-instant) linear, color var(--dur-instant) linear;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.button:active:not(:disabled) {
+  background: var(--bg-active);
+}
+.button:focus-visible {
+  outline: var(--ring-w) solid var(--ring-color);
+  outline-offset: var(--ring-offset);
+}
+.button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.s24 {
+  width: 24px;
+  height: 24px;
+}
+.s28 {
+  width: 28px;
+  height: 28px;
+}
+.s32 {
+  width: 32px;
+  height: 32px;
+}
+
+/* 8px hit-area bleed on the 28px row-action size, via a pseudo-element so
+   the visible box stays small inside a 64px row. */
+.s28::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+}
+
+.icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+}

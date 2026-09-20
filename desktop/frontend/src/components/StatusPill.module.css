@@ -1,0 +1,80 @@
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 20px;
+  padding: 0 var(--space-2) 0 var(--space-1);
+  border-radius: var(--radius-full);
+  font-size: var(--fs-200);
+  line-height: 1;
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.dense {
+  height: 16px;
+  font-size: 10px;
+  padding: 0 6px 0 4px;
+}
+
+.pending {
+  color: var(--st-pending);
+  border-color: var(--st-pending-line);
+  background: transparent;
+}
+
+.running {
+  color: var(--st-running);
+  background: var(--st-running-tint);
+  border-color: var(--st-running-line);
+}
+
+.succeeded {
+  color: var(--st-succeeded);
+  background: var(--st-succeeded-tint);
+  border-color: var(--st-succeeded-line);
+}
+
+.failed {
+  color: var(--st-failed);
+  background: var(--st-failed-tint);
+  border-color: var(--st-failed-line);
+  background-image: repeating-linear-gradient(45deg, var(--hatch-line-subtle) 0 3px, transparent 3px 6px);
+}
+
+.canceled,
+.canceling {
+  color: var(--st-canceled);
+  background: transparent;
+  border: 1px dotted var(--st-canceled-line);
+  opacity: 0.85;
+}
+
+.locked {
+  color: var(--st-locked);
+  background: var(--st-locked-tint);
+  border-color: var(--st-locked-line);
+}
+
+/* Motion only on `running` — the strongest signal in the app, spent on
+   exactly one thing (DESIGN.md §3 rule 4). */
+.running .glyph {
+  animation: helios-spin 900ms var(--ease-linear) infinite;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .running .glyph {
+    animation: helios-pulse 1400ms linear infinite !important;
+  }
+}
+
+.glyph {
+  flex-shrink: 0;
+}
+
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

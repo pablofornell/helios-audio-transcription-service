@@ -1,0 +1,37 @@
+.section {
+  margin-bottom: var(--space-5);
+}
+.section:last-child {
+  margin-bottom: 0;
+}
+
+.sectionTitle {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-100);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-200);
+}
+
+.table tr:not(:last-child) td {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.key {
+  padding: var(--space-1) var(--space-2) var(--space-1) 0;
+  color: var(--text-primary);
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+.action {
+  padding: var(--space-1) 0;
+  color: var(--text-secondary);
+}

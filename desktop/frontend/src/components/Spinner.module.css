@@ -1,0 +1,18 @@
+.spinner {
+  color: var(--accent-graphic);
+  animation: helios-spin 900ms var(--ease-linear) infinite;
+  flex-shrink: 0;
+}
+
+/*
+ * Coordinator ruling §3: under reduced motion the spinner keeps a
+ * non-rotational pulse instead of freezing. This overrides the global
+ * `animation-duration: 1ms !important` in styles/base.css for this class
+ * specifically, the same exception DESIGN.md §7's own reduced-motion block
+ * carves out.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: helios-pulse 1400ms linear infinite !important;
+  }
+}

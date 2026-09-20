@@ -1,0 +1,117 @@
+.track {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-hover);
+}
+
+.lane {
+  width: 100%;
+  height: 3px;
+  border-radius: 0;
+}
+
+.bar {
+  width: 100%;
+  height: 6px;
+  border-radius: var(--radius-full);
+}
+
+.fill {
+  height: 100%;
+  background: var(--st-running);
+  transition: width var(--dur-progress) var(--ease-linear), background-color var(--dur-slow) var(--ease-inout);
+}
+
+.determinate {
+  background: var(--st-running);
+}
+
+/*
+ * A finished lane has to recede. DESIGN.md's opening principle is that colour
+ * is spent almost exclusively on things currently in motion and the app is
+ * nearly monochrome when nothing is downloading -- but a full-strength lane
+ * under every succeeded row makes a settled library the loudest screen in the
+ * app, which is precisely backwards. The settle animation still brightens
+ * once on completion (the moment IS worth marking), then rests dim, so a
+ * running row remains the only thing pulling the eye.
+ */
+.complete {
+  background: var(--st-succeeded);
+  opacity: 0.32;
+  animation: settle var(--dur-settle) 1;
+}
+
+@keyframes settle {
+  0% {
+    opacity: 1;
+    filter: brightness(1);
+  }
+  40% {
+    opacity: 1;
+    filter: brightness(1.25);
+  }
+  100% {
+    opacity: 0.32;
+    filter: brightness(1);
+  }
+}
+
+.failed {
+  background: var(--st-failed);
+  opacity: 0.5;
+}
+
+/* Canceled is a deliberate stop, not a failure: ghost-grey, frozen, never red.
+   Locked (auth_required) likewise carries the one cool hue -- the whole point
+   of that status is that it is not the user's fault. */
+.canceled {
+  background: var(--st-canceled);
+  opacity: 0.45;
+  animation-play-state: paused;
+}
+
+.locked {
+  background: var(--st-locked);
+  opacity: 0.55;
+  animation-play-state: paused;
+  background-image: repeating-linear-gradient(45deg, var(--hatch-line) 0 4px, transparent 4px 8px);
+}
+
+.stale {
+  background: var(--st-running);
+  animation-play-state: paused;
+  filter: saturate(0.25);
+  background-image: repeating-linear-gradient(45deg, var(--hatch-line) 0 4px, transparent 4px 8px);
+}
+
+.indeterminate {
+  width: 34% !important;
+  background: var(--st-running);
+  animation: shuttle 1600ms var(--ease-inout) infinite;
+}
+
+@keyframes shuttle {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(294%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .indeterminate {
+    animation: none !important;
+    width: 100% !important;
+    transform: none !important;
+    opacity: 0.4;
+    background: none;
+    background-image: repeating-linear-gradient(45deg, var(--st-running) 0 6px, transparent 6px 12px);
+  }
+  .fill {
+    transition: width 1ms !important;
+  }
+  .complete {
+    animation: none !important;
+  }
+}

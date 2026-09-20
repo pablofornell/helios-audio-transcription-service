@@ -1,0 +1,125 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+  transition: background-color var(--dur-instant) linear, color var(--dur-instant) linear, border-color var(--dur-instant) linear;
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.button:focus-visible {
+  outline: var(--ring-w) solid var(--ring-color);
+  outline-offset: var(--ring-offset);
+}
+
+/* ---------- Sizes ---------- */
+.sm {
+  height: var(--control-h-sm);
+  font-size: var(--fs-200);
+  padding: 0 10px;
+}
+.md {
+  height: var(--control-h-md);
+  font-size: var(--fs-300);
+  padding: 0 12px;
+}
+.lg {
+  height: var(--control-h-lg);
+  font-size: var(--fs-400);
+  padding: 0 16px;
+}
+
+/* ---------- Variants ---------- */
+.primary {
+  background: var(--accent-solid);
+  color: var(--accent-on);
+  border-color: transparent;
+}
+.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.primary:active:not(:disabled) {
+  background: var(--accent-press);
+  transform: translateY(0.5px);
+}
+
+.neutral {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+.neutral:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.neutral:active:not(:disabled) {
+  background: var(--bg-active);
+  transform: translateY(0.5px);
+}
+
+.ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+.ghost:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.ghost:active:not(:disabled) {
+  background: var(--bg-active);
+  transform: translateY(0.5px);
+}
+
+/* Destructive actions are ghost at rest and only turn red on hover — a
+   destructive action should not read as alarmed all the time. */
+.danger {
+  background: transparent;
+  color: var(--text-secondary);
+}
+.danger:hover:not(:disabled) {
+  background: var(--st-failed-tint);
+  color: var(--st-failed);
+}
+.danger:active:not(:disabled) {
+  background: var(--st-failed-tint);
+  color: var(--st-failed);
+  transform: translateY(0.5px);
+}
+
+/* ---------- States ---------- */
+.button:disabled,
+.button[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: default;
+}
+.button[aria-disabled="true"] {
+  pointer-events: none;
+}
+
+.loading {
+  min-width: 5.5em;
+}
+
+.leading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  opacity: 0.7;
+  font-style: normal;
+  margin-left: var(--space-1);
+}

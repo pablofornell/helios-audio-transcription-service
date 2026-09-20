@@ -1,0 +1,54 @@
+/* New-row enter — opacity 0->1, translateY(-4px)->0, --dur-base
+   --ease-standard. Row itself deliberately doesn't wire this up (a row
+   can't tell a genuine insertion from a re-render); this is the caller
+   doing it, keyed to real insertions only via useTranscribeQueue's
+   tracking. */
+.entering {
+  animation: row-enter var(--dur-base) var(--ease-standard);
+}
+@keyframes row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.title {
+  display: block;
+}
+
+.meta {
+  display: block;
+}
+
+.metaError {
+  color: var(--st-failed);
+}
+
+.sep {
+  opacity: 0.4;
+}
+
+.metric {
+  display: inline-block;
+}
+
+.thumbPlaceholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  opacity: 0.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .entering {
+    animation-duration: 1ms;
+  }
+}

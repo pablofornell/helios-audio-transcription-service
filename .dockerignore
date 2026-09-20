@@ -22,6 +22,15 @@ data/
 models/
 *.bin
 
+# Desktop app build output: irrelevant to this image (only
+# cmd/helios-transcription-api and internal/** are built here), and
+# desktop/frontend/node_modules/ in particular would otherwise balloon the
+# build context for no reason.
+desktop/frontend/dist/
+desktop/frontend/node_modules/
+desktop/frontend/package.json.md5
+desktop/build/
+
 # Editor / OS cruft
 .idea/
 .vscode/

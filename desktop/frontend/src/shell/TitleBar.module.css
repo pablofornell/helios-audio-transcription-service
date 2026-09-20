@@ -1,0 +1,25 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--toolbar-h);
+  padding: 0 var(--space-3) 0 calc(var(--space-3) + var(--titlebar-inset));
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  /* Lets the OS window chrome drag the window from this strip on
+     platforms where Wails maps -webkit-app-region (harmless elsewhere). */
+  -webkit-app-region: drag;
+}
+
+.title {
+  font-size: var(--fs-300);
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  -webkit-app-region: no-drag;
+}

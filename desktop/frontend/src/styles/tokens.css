@@ -1,0 +1,345 @@
+/*
+ * Design tokens — DESIGN.md §2.2.
+ *
+ * Binding ruling (Coordinator rulings §5): every colour is defined on bare
+ * :root first (the light values, since light is the base). Only the values
+ * that change for dark are then overridden twice — once under the explicit
+ * [data-theme="dark"] selector, once under the guarded
+ * `@media (prefers-color-scheme: dark)` query — so the OS preference and the
+ * explicit in-app toggle both work independently of each other. No colour
+ * may be defined ONLY inside a media query or a [data-theme] block: check
+ * this file against that rule before touching it.
+ *
+ * The app stamps data-theme="dark" on first run (see src/lib/theme.ts) —
+ * this is a media tool and dark is the working default — but a user who
+ * explicitly picks "Light" in Settings gets [data-theme="light"], and that
+ * selector intentionally carries no declarations of its own: it works by
+ * *not* matching [data-theme="dark"], falling through to the bare :root
+ * values below, which are already the light palette.
+ */
+
+:root {
+  /* ---------- Neutral ramp (warm, hue ~40, very low chroma) ---------- */
+  --n-0: #FFFFFF;
+  --n-25: #FBF9F5;
+  --n-50: #F4F1EA;
+  --n-100: #E9E5DB;
+  --n-200: #D8D3C6;
+  --n-300: #BDB7A8;
+  --n-400: #9C9585;
+  --n-500: #7C7568;
+  --n-600: #57524A;
+  --n-700: #3A3630;
+  --n-800: #262320;
+  --n-850: #1C1A17;
+  --n-900: #131210;
+  --n-950: #0D0C0A;
+
+  /* ---------- Surfaces (light) ---------- */
+  --bg-app: var(--n-25); /* the window itself */
+  --bg-surface: var(--n-0); /* lists, panels */
+  --bg-sunken: var(--n-50); /* toolbars, table headers, input wells */
+  --bg-raised: var(--n-0); /* popovers, menus, dialogs */
+  --bg-hover: rgba(28, 26, 22, 0.045);
+  --bg-active: rgba(28, 26, 22, 0.075);
+  --bg-selected: rgba(28, 26, 22, 0.06);
+  --bg-scrim: rgba(28, 26, 22, 0.40);
+
+  /* ---------- Text (light) ---------- */
+  --text-primary: #1C1A16; /* 15.2:1 on --bg-app */
+  --text-secondary: #57524A; /*  7.4:1 */
+  --text-tertiary: #7C7568; /*  4.6:1 */
+  --text-disabled: #A8A296; /*  2.8:1 — non-essential only */
+  --text-inverse: #FBF9F5;
+
+  /*
+   * ---------- Lines (light) ----------
+   * The three hairline tiers are aliases onto --border-tier-N rather than
+   * literal values directly, so that `prefers-contrast: more` (base.css) can
+   * promote --border-subtle/--border onto the next tier up WITHOUT the
+   * self-reference collapse that a plain `--border-subtle: var(--border)`
+   * plus `--border: var(--border-strong)` in the same rule produces: custom
+   * properties resolve against the WINNING value of the referenced property
+   * for the element, not against "the value before this rule ran", so once
+   * --border is reassigned, anything reading var(--border) — including in
+   * the very same rule — reads the NEW value. --border-tier-N is never
+   * itself reassigned by the promotion, so it is safe to read from either
+   * side of it.
+   */
+  --border-tier-1: rgba(28, 26, 22, 0.09);
+  --border-tier-2: rgba(28, 26, 22, 0.16);
+  --border-tier-3: rgba(28, 26, 22, 0.28);
+  --border-subtle: var(--border-tier-1);
+  --border: var(--border-tier-2);
+  --border-strong: var(--border-tier-3);
+
+  /* ---------- Decorative hatch strokes ----------
+   * Theme-invariant on purpose (DESIGN.md §8 "Other") — a fixed mid-grey at
+   * low alpha reads acceptably against both the light and dark surfaces
+   * these appear on, so unlike every other colour above these are declared
+   * once, not per-theme. --hatch-line is the ProgressBar `locked`/`stale`
+   * diagonal stroke; --hatch-line-subtle is StatusPill's thinner `failed`
+   * stroke, which needs a lighter touch at pill scale.
+   */
+  --hatch-line: rgba(128, 128, 128, 0.14);
+  --hatch-line-subtle: rgba(128, 128, 128, 0.06);
+
+  /* ---------- Accent: solar ---------- */
+  --accent-solid: #8A5200; /* filled buttons; 6.1:1 with --accent-on */
+  --accent-hover: #6F4200;
+  --accent-press: #573400;
+  --accent-on: #FFF8EC;
+  --accent-graphic: #D98A00; /* progress fills, rails, focus ring — 3.1:1 non-text */
+  --accent-tint: rgba(217, 138, 0, 0.12);
+  --accent-line: rgba(217, 138, 0, 0.42);
+
+  /* ---------- Status (light) ---------- */
+  --st-pending: #5B6672;
+  --st-pending-tint: rgba(91, 102, 114, 0.10);
+  --st-pending-line: rgba(91, 102, 114, 0.40);
+  --st-running: #B06A00;
+  --st-running-tint: rgba(217, 138, 0, 0.12);
+  --st-running-line: rgba(217, 138, 0, 0.45);
+  --st-succeeded: #1E7A45;
+  --st-succeeded-tint: rgba(30, 122, 69, 0.10);
+  --st-succeeded-line: rgba(30, 122, 69, 0.40);
+  --st-failed: #B02A1E;
+  --st-failed-tint: rgba(176, 42, 30, 0.10);
+  --st-failed-line: rgba(176, 42, 30, 0.40);
+  --st-canceled: #6E6659;
+  --st-canceled-tint: rgba(110, 102, 89, 0.10);
+  --st-canceled-line: rgba(110, 102, 89, 0.35);
+  --st-locked: #1F5FB8;
+  --st-locked-tint: rgba(31, 95, 184, 0.10);
+  --st-locked-line: rgba(31, 95, 184, 0.40);
+  --st-stale: #8A8377;
+
+  /* ---------- Elevation (light) ---------- */
+  --shadow-1: 0 1px 2px rgba(28, 26, 22, 0.08);
+  --shadow-2: 0 4px 12px -2px rgba(28, 26, 22, 0.12), 0 0 0 1px rgba(28, 26, 22, 0.06);
+  --shadow-3: 0 18px 44px -10px rgba(28, 26, 22, 0.22), 0 0 0 1px rgba(28, 26, 22, 0.08);
+  --shadow-inset-well: inset 0 1px 2px rgba(28, 26, 22, 0.06);
+
+  /* ---------- Type ---------- */
+  --font-ui: "Instrument Sans", "Segoe UI", Ubuntu, Cantarell, sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --font-serif: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+
+  --fs-100: 11px;
+  --lh-100: 16px; /* micro labels, uppercase meta */
+  --fs-200: 12px;
+  --lh-200: 16px; /* secondary meta, captions */
+  --fs-300: 13px;
+  --lh-300: 18px; /* dense UI: table cells, inputs, buttons */
+  --fs-400: 14px;
+  --lh-400: 20px; /* body default */
+  --fs-500: 16px;
+  --lh-500: 22px; /* row titles, panel titles */
+  --fs-600: 20px;
+  --lh-600: 26px; /* screen titles */
+  --fs-700: 28px;
+  --lh-700: 34px; /* empty-state headline (serif) */
+  --fs-800: 40px;
+  --lh-800: 44px; /* first-run headline only (serif) */
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --track-tight: -0.02em; /* >=28px */
+  --track-snug: -0.01em; /* 20px */
+  --track-normal: 0;
+  --track-wide: 0.06em; /* 11px uppercase */
+
+  /* ---------- Space (4px base, one 2px half-step) ---------- */
+  --space-0: 0;
+  --space-05: 2px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+  --space-10: 64px;
+  --space-11: 80px;
+
+  /* ---------- Radii (small on purpose — sharp reads professional) ---------- */
+  --radius-xs: 3px; /* thumbnails, progress lanes */
+  --radius-sm: 5px; /* inputs, buttons, pills-with-corners */
+  --radius-md: 8px; /* panels, menus, dialogs */
+  --radius-lg: 12px; /* the first-run composer only */
+  --radius-full: 999px;
+
+  /* ---------- Fixed geometry ---------- */
+  --sidebar-w: 208px;
+  --sidebar-w-collapsed: 64px;
+  --toolbar-h: 44px;
+  --row-h-queue: 64px;
+  --row-h-library: 56px;
+  --detail-w: 380px;
+  --connbar-h: 28px;
+  --titlebar-inset: 0px; /* macOS frameless sets this to 78px */
+  --control-h-sm: 26px;
+  --control-h-md: 32px;
+  --control-h-lg: 40px;
+  --field-h: 44px; /* the URL field only */
+
+  /* ---------- Motion ---------- */
+  --dur-instant: 80ms; /* hover/press tints */
+  --dur-fast: 140ms; /* pill cross-fade, tooltip, glyph swap */
+  --dur-base: 200ms; /* row enter, thumbnail fade-in */
+  --dur-slow: 320ms; /* detail panel, view change */
+  --dur-progress: 400ms; /* progress-bar width between SSE ticks */
+  --dur-settle: 600ms; /* one-shot success settle */
+  --dur-flash: 900ms; /* new-row flash ring decay */
+
+  --ease-standard: cubic-bezier(0.32, 0.72, 0, 1); /* native-feeling decel */
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-linear: linear; /* progress width only */
+
+  /* ---------- Focus ---------- */
+  --ring-w: 2px;
+  --ring-offset: 2px;
+  --ring-color: var(--accent-graphic);
+  --z-detail: 30;
+  --z-sticky: 40;
+  --z-menu: 50;
+  --z-toast: 60;
+  --z-dialog: 70;
+}
+
+/*
+ * Explicit dark toggle. Only the values that change from the bare :root
+ * (light) block above are redeclared here — see this file's header comment
+ * for why every one of these must also appear, verbatim, in the media query
+ * block below.
+ */
+:root[data-theme="dark"] {
+  --bg-app: var(--n-950);
+  --bg-surface: var(--n-900);
+  --bg-sunken: #0A0908;
+  --bg-raised: var(--n-850);
+  --bg-hover: rgba(255, 247, 231, 0.05);
+  --bg-active: rgba(255, 247, 231, 0.085);
+  --bg-selected: rgba(255, 247, 231, 0.07);
+  --bg-scrim: rgba(6, 5, 4, 0.62);
+
+  --text-primary: #F2EFE8; /* 16.4:1 on --bg-app */
+  --text-secondary: #A8A296; /*  7.2:1 */
+  --text-tertiary: #857F73; /*  4.7:1 */
+  --text-disabled: #5C5750; /*  2.6:1 — non-essential only */
+  --text-inverse: #17150F;
+
+  --border-tier-1: rgba(255, 247, 231, 0.07);
+  --border-tier-2: rgba(255, 247, 231, 0.13);
+  --border-tier-3: rgba(255, 247, 231, 0.22);
+  --border-subtle: var(--border-tier-1);
+  --border: var(--border-tier-2);
+  --border-strong: var(--border-tier-3);
+
+  --accent-solid: #FFB020;
+  --accent-hover: #FFC04A;
+  --accent-press: #E89A0C;
+  --accent-on: #1A1200;
+  --accent-graphic: #FFB020;
+  --accent-tint: rgba(255, 176, 32, 0.14);
+  --accent-line: rgba(255, 176, 32, 0.38);
+
+  --st-pending: #9BA7B4;
+  --st-pending-tint: rgba(155, 167, 180, 0.13);
+  --st-pending-line: rgba(155, 167, 180, 0.36);
+  --st-running: #FFB020;
+  --st-running-tint: rgba(255, 176, 32, 0.14);
+  --st-running-line: rgba(255, 176, 32, 0.38);
+  --st-succeeded: #6BCB86;
+  --st-succeeded-tint: rgba(107, 203, 134, 0.13);
+  --st-succeeded-line: rgba(107, 203, 134, 0.36);
+  --st-failed: #FF7A6B;
+  --st-failed-tint: rgba(255, 122, 107, 0.13);
+  --st-failed-line: rgba(255, 122, 107, 0.36);
+  --st-canceled: #8A8377;
+  --st-canceled-tint: rgba(138, 131, 119, 0.12);
+  --st-canceled-line: rgba(138, 131, 119, 0.32);
+  --st-locked: #86B6F6;
+  --st-locked-tint: rgba(134, 182, 246, 0.13);
+  --st-locked-line: rgba(134, 182, 246, 0.36);
+  --st-stale: #6B655C;
+
+  --shadow-1: inset 0 1px 0 rgba(255, 247, 231, 0.05), 0 1px 2px rgba(0, 0, 0, 0.60);
+  --shadow-2: 0 4px 12px -2px rgba(0, 0, 0, 0.70), 0 0 0 1px rgba(255, 247, 231, 0.08);
+  --shadow-3: 0 16px 40px -8px rgba(0, 0, 0, 0.80), 0 0 0 1px rgba(255, 247, 231, 0.10);
+  --shadow-inset-well: inset 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+/*
+ * Same declarations again, verbatim, so the OS preference works before the
+ * user has chosen anything in Settings and on a machine that never gets an
+ * explicit choice at all. `:root:not([data-theme="light"])` means: apply
+ * whenever the OS prefers dark AND the user has not explicitly forced
+ * light — an explicit [data-theme="dark"] is already matched by the block
+ * above regardless of this query, and an explicit [data-theme="light"]
+ * always wins here because of the :not(). This is the binding instruction
+ * from Coordinator rulings §5, not a suggestion: do not let this block
+ * drift from the one above it.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg-app: var(--n-950);
+    --bg-surface: var(--n-900);
+    --bg-sunken: #0A0908;
+    --bg-raised: var(--n-850);
+    --bg-hover: rgba(255, 247, 231, 0.05);
+    --bg-active: rgba(255, 247, 231, 0.085);
+    --bg-selected: rgba(255, 247, 231, 0.07);
+    --bg-scrim: rgba(6, 5, 4, 0.62);
+
+    --text-primary: #F2EFE8;
+    --text-secondary: #A8A296;
+    --text-tertiary: #857F73;
+    --text-disabled: #5C5750;
+    --text-inverse: #17150F;
+
+    --border-tier-1: rgba(255, 247, 231, 0.07);
+    --border-tier-2: rgba(255, 247, 231, 0.13);
+    --border-tier-3: rgba(255, 247, 231, 0.22);
+    --border-subtle: var(--border-tier-1);
+    --border: var(--border-tier-2);
+    --border-strong: var(--border-tier-3);
+
+    --accent-solid: #FFB020;
+    --accent-hover: #FFC04A;
+    --accent-press: #E89A0C;
+    --accent-on: #1A1200;
+    --accent-graphic: #FFB020;
+    --accent-tint: rgba(255, 176, 32, 0.14);
+    --accent-line: rgba(255, 176, 32, 0.38);
+
+    --st-pending: #9BA7B4;
+    --st-pending-tint: rgba(155, 167, 180, 0.13);
+    --st-pending-line: rgba(155, 167, 180, 0.36);
+    --st-running: #FFB020;
+    --st-running-tint: rgba(255, 176, 32, 0.14);
+    --st-running-line: rgba(255, 176, 32, 0.38);
+    --st-succeeded: #6BCB86;
+    --st-succeeded-tint: rgba(107, 203, 134, 0.13);
+    --st-succeeded-line: rgba(107, 203, 134, 0.36);
+    --st-failed: #FF7A6B;
+    --st-failed-tint: rgba(255, 122, 107, 0.13);
+    --st-failed-line: rgba(255, 122, 107, 0.36);
+    --st-canceled: #8A8377;
+    --st-canceled-tint: rgba(138, 131, 119, 0.12);
+    --st-canceled-line: rgba(138, 131, 119, 0.32);
+    --st-locked: #86B6F6;
+    --st-locked-tint: rgba(134, 182, 246, 0.13);
+    --st-locked-line: rgba(134, 182, 246, 0.36);
+    --st-stale: #6B655C;
+
+    --shadow-1: inset 0 1px 0 rgba(255, 247, 231, 0.05), 0 1px 2px rgba(0, 0, 0, 0.60);
+    --shadow-2: 0 4px 12px -2px rgba(0, 0, 0, 0.70), 0 0 0 1px rgba(255, 247, 231, 0.08);
+    --shadow-3: 0 16px 40px -8px rgba(0, 0, 0, 0.80), 0 0 0 1px rgba(255, 247, 231, 0.10);
+    --shadow-inset-well: inset 0 1px 2px rgba(0, 0, 0, 0.45);
+  }
+}

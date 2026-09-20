@@ -1,0 +1,42 @@
+.track {
+  display: inline-flex;
+  height: var(--control-h-md);
+  background: var(--bg-sunken);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  gap: 2px;
+}
+
+.disabled {
+  opacity: 0.45;
+}
+
+.option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-2);
+  border: none;
+  background: transparent;
+  border-radius: calc(var(--radius-sm) - 2px);
+  font-size: var(--fs-300);
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+  cursor: default;
+  transition: background-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
+}
+
+.option:focus-visible {
+  outline: var(--ring-w) solid var(--ring-color);
+  outline-offset: 1px;
+}
+
+.selected {
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-1);
+  color: var(--text-primary);
+}
+
+.disabled .option {
+  cursor: default;
+}

@@ -1,0 +1,249 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  width: var(--detail-w);
+  flex-shrink: 0;
+  height: 100%;
+  /* A flex item will not shrink below its content without this, so the
+     overflow-y below never engages. */
+  min-height: 0;
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border-subtle);
+  overflow-y: auto;
+  animation: detail-slide-in var(--dur-slow) var(--ease-standard);
+}
+
+@keyframes detail-slide-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.overlay {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-detail);
+  box-shadow: var(--shadow-3);
+}
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  z-index: calc(var(--z-detail) - 1);
+  background: var(--bg-scrim);
+}
+
+.header {
+  position: relative;
+}
+
+.thumbWrap {
+  position: relative;
+  width: 100%;
+  height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-sunken);
+  color: var(--text-tertiary);
+}
+
+.closeButton {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  background: var(--bg-scrim);
+  color: var(--text-inverse);
+}
+
+.body {
+  padding: var(--space-4);
+}
+
+.statusRow {
+  margin-bottom: var(--space-2);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--fs-600);
+  line-height: var(--lh-600);
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+  letter-spacing: var(--track-snug);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.subtitle {
+  margin: var(--space-1) 0 0;
+  font-size: var(--fs-300);
+  color: var(--text-secondary);
+}
+
+.hr {
+  margin: var(--space-4) 0;
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.reasonBlock {
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--st-failed-tint);
+}
+
+.reasonHeadline {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-400);
+  font-weight: var(--fw-medium);
+  color: var(--text-primary);
+}
+
+.reasonBody {
+  margin: 0;
+  font-size: var(--fs-200);
+  color: var(--text-secondary);
+}
+
+.reasonCode {
+  display: block;
+  margin-top: var(--space-2);
+  color: var(--text-tertiary);
+}
+
+.reasonActions {
+  margin-top: var(--space-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.definitionList {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 108px 1fr;
+  row-gap: var(--space-2);
+  column-gap: var(--space-3);
+}
+
+.definitionList dt {
+  font-size: var(--fs-200);
+  color: var(--text-tertiary);
+}
+
+.definitionList dd {
+  margin: 0;
+  font-size: var(--fs-300);
+  color: var(--text-primary);
+}
+
+.sectionHeading {
+  margin: 0 0 var(--space-3);
+  font-size: var(--fs-100);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.audioPlayer {
+  width: 100%;
+  margin-bottom: var(--space-3);
+}
+
+.transcriptHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.transcriptHeader .sectionHeading {
+  margin-bottom: 0;
+}
+
+.transcriptText {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: var(--fs-200);
+  line-height: var(--lh-400);
+  color: var(--text-primary);
+  background: var(--bg-sunken);
+  border-radius: var(--radius-sm);
+}
+
+.transcriptSkeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+}
+
+.segmentList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.segmentRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+}
+
+.segmentTime {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent-graphic);
+  font-size: var(--fs-200);
+  cursor: pointer;
+}
+.segmentTime:hover {
+  text-decoration: underline;
+}
+.segmentTime:focus-visible {
+  outline: var(--ring-w) solid var(--ring-color);
+  outline-offset: var(--ring-offset);
+}
+
+.segmentText {
+  font-size: var(--fs-300);
+  color: var(--text-primary);
+}
+
+.anomaly {
+  margin: 0;
+  font-size: var(--fs-300);
+  color: var(--st-failed);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.mediaNote {
+  margin: 0;
+  font-size: var(--fs-200);
+  color: var(--text-tertiary);
+}

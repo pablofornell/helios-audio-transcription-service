@@ -1,7 +1,21 @@
 GO := export PATH="/usr/local/go/bin:$$HOME/go/bin:$$PATH"; go
+WAILS := export PATH="/usr/local/go/bin:$$HOME/go/bin:$$PATH"; wails
 BINARY := helios-transcription-api
 DOCKER_IMAGE := helios-transcription-api
 COMPOSE := docker compose -f deploy/docker-compose.yml
+# Ubuntu 24.04 ships libwebkit2gtk-4.1-dev, not the 4.0 package Wails v2
+# looks for by default; every desktop build/dev invocation needs this tag.
+# It is also set as desktop/wails.json's own "build:tags", so this is
+# belt-and-suspenders, not the only place it is declared.
+DESKTOP_TAGS := webkit2_41
+
+# `go ./...` walks desktop/frontend/node_modules, where at least one npm
+# package ships a stray Go file. It is not ours, it is gitignored, and it
+# has no business in our build -- but the go command only skips testdata
+# and dot/underscore directories, so it must be filtered explicitly. CI is
+# unaffected (its Go job never runs npm install), which is exactly why
+# this would otherwise only ever bite someone locally.
+PKGS = $$($(GO) list ./... | grep -v /node_modules/)
 
 .DEFAULT_GOAL := help
 
@@ -15,7 +29,7 @@ build: ## Build the helios-transcription-api binary.
 
 .PHONY: test
 test: ## Run the test suite.
-	$(GO) test ./...
+	$(GO) test $(PKGS)
 
 .PHONY: e2e
 e2e: ## Run the in-process end-to-end suite (internal/e2e); needs Docker for its Postgres testcontainer.
@@ -34,7 +48,7 @@ fmt: ## Check formatting; fails if gofmt would change anything.
 
 .PHONY: vet
 vet: ## Run go vet.
-	$(GO) vet ./...
+	$(GO) vet $(PKGS)
 
 .PHONY: run
 run: ## Run helios-transcription-api locally (reads HELIOS_* env vars).
@@ -67,3 +81,15 @@ compose-logs: ## Tail docker compose logs.
 .PHONY: tidy
 tidy: ## Run go mod tidy.
 	$(GO) mod tidy
+
+.PHONY: desktop-dev
+desktop-dev: ## Run the Wails desktop app in dev mode (HELIOS_API_URL via env; defaults to http://localhost:7462).
+	cd desktop && $(WAILS) dev -tags $(DESKTOP_TAGS)
+
+.PHONY: desktop-build
+desktop-build: ## Build the Wails desktop app binary (desktop/build/bin/helios-ats-desktop).
+	cd desktop && $(WAILS) build -tags $(DESKTOP_TAGS)
+
+.PHONY: desktop-run
+desktop-run: desktop-build ## Build the production desktop binary and launch it (HELIOS_API_URL via env).
+	./desktop/build/bin/helios-ats-desktop

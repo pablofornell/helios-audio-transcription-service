@@ -64,6 +64,15 @@ const (
 	// classified as ToolFailure or Timeout at the point it is detected.
 	// Operators can always retry by hand.
 	ErrCodeInternal ErrorCode = "internal"
+	// ErrCodeNetwork means a client could not reach the server at all --
+	// connection refused, DNS failure, connection reset. It is the one code
+	// in this taxonomy the SERVER never produces: it is classified by
+	// internal/httpclient on the caller's side, and it exists here because
+	// the taxonomy is shared by both halves and a caller genuinely needs to
+	// tell "the server is not there" apart from "the server has a bug".
+	// The desktop client's connection indicator turns on exactly this
+	// distinction. Transient -- retryable.
+	ErrCodeNetwork ErrorCode = "network"
 )
 
 // Retryable reports whether a failure of this ErrorCode is worth another
@@ -74,7 +83,7 @@ const (
 // bug).
 func (c ErrorCode) Retryable() bool {
 	switch c {
-	case ErrCodeToolFailure, ErrCodeTimeout:
+	case ErrCodeToolFailure, ErrCodeTimeout, ErrCodeNetwork:
 		return true
 	default:
 		return false

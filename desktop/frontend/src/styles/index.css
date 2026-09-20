@@ -1,0 +1,8 @@
+/*
+ * Single entry point for global CSS, imported once from src/main.tsx.
+ * Order matters: fonts declare their @font-face rules before tokens use
+ * them, tokens define every custom property before base uses them.
+ */
+@import "./fonts.css";
+@import "./tokens.css";
+@import "./base.css";

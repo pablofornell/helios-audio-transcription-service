@@ -30,6 +30,10 @@ var statusForCode = map[domain.ErrorCode]int{
 	// what CONTRACT.md's error table borrows for a canceled request.
 	domain.ErrCodeCanceled: statusClientClosedRequest,
 	domain.ErrCodeInternal: http.StatusInternalServerError,
+	// The server never emits ErrCodeNetwork (it is what a client calls a
+	// failure to reach the server), but the table stays total so a future
+	// code cannot silently fall through to a default.
+	domain.ErrCodeNetwork: http.StatusBadGateway,
 }
 
 // statusClientClosedRequest is the (non-standard, but widely recognised)

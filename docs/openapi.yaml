@@ -537,6 +537,7 @@ components:
         - timeout
         - canceled
         - internal
+                - network
 
     Options:
       type: object

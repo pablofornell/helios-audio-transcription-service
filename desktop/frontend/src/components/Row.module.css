@@ -1,0 +1,197 @@
+.row {
+  position: relative;
+  list-style: none;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.main {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-3);
+  transition: background-color var(--dur-instant) linear;
+}
+
+.queue .main {
+  height: var(--row-h-queue);
+}
+.library .main {
+  height: var(--row-h-library);
+}
+
+.row:hover .main {
+  background: var(--bg-hover);
+}
+.row:focus-within .main {
+  background: var(--bg-hover);
+}
+/* :has(:focus-visible), not :focus-within — the focusable descendants
+   (Cancel, ⋯) are what receive DOM focus, but a mouse click on either must
+   not leave a ring around the whole 64px row (base.css §"the one shared
+   focus treatment"); :focus-within fires for pointer-triggered focus too,
+   :has(:focus-visible) only for the keyboard/programmatic case. */
+.row:has(:focus-visible) {
+  outline: var(--ring-w) solid var(--ring-color);
+  outline-offset: -2px;
+}
+
+.selected .main {
+  background: var(--bg-selected);
+}
+
+/* Status rail — 3px, colour transitions slowly on change (the "settled" tell). */
+.rail {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--st-pending);
+  transition: background-color var(--dur-slow) var(--ease-inout);
+}
+
+.row[data-status="pending"] .rail {
+  background: var(--st-pending);
+  opacity: 0.4;
+}
+.row[data-status="running"] .rail {
+  background: var(--st-running);
+}
+.row[data-status="succeeded"] .rail {
+  background: var(--st-succeeded);
+}
+.row[data-status="failed"] .rail {
+  background: var(--st-failed);
+}
+.row[data-status="canceled"] .rail,
+.row[data-status="canceling"] .rail {
+  background: var(--st-canceled);
+  opacity: 0.3;
+}
+.row[data-status="locked"] .rail {
+  background: var(--st-locked);
+}
+
+/* Selection outranks status for the rail (DESIGN.md §4.4). */
+.selected .rail {
+  width: 2px;
+  background: var(--accent-graphic);
+  opacity: 1;
+}
+
+.checkbox {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+}
+
+.thumb {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+  background: var(--bg-sunken);
+}
+.queue .thumb {
+  width: 56px;
+  height: 32px;
+}
+.library .thumb {
+  width: 48px;
+  height: 27px;
+}
+
+.titleBlock {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--fs-500);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-500);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  font-size: var(--fs-200);
+  line-height: var(--lh-200);
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stale .meta,
+.stale .metric {
+  color: var(--st-stale);
+}
+
+.status {
+  flex-shrink: 0;
+}
+
+.metric {
+  flex-shrink: 0;
+  width: 88px;
+  text-align: right;
+  font-size: var(--fs-300);
+  color: var(--text-secondary);
+}
+
+.actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.secondaryActions {
+  opacity: 0;
+  transition: opacity var(--dur-instant) linear;
+}
+.row:hover .secondaryActions,
+.row:focus-within .secondaryActions {
+  opacity: 1;
+}
+
+.lane {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
+.expandedPanel {
+  padding: var(--space-3) var(--space-3) var(--space-4) calc(var(--space-3) + 3px);
+  background: var(--st-locked-tint);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Flash ring — decays to 0 over --dur-flash, one shot. */
+.flash .main {
+  animation: flash-ring var(--dur-flash) var(--ease-exit) 1;
+}
+@keyframes flash-ring {
+  from {
+    box-shadow: inset 0 0 0 2px var(--accent-line);
+  }
+  to {
+    box-shadow: inset 0 0 0 2px transparent;
+  }
+}
+
+/*
+ * New-row enter (opacity 0->1, translateY(-4px)->0 over --dur-base,
+ * DESIGN.md §7) is deliberately NOT wired up here: Row cannot tell a
+ * genuinely new row from a re-render of an existing one. Callers that
+ * insert a row at the top of a live list should apply that transition
+ * themselves (e.g. a mount-triggered class, or a small animation library),
+ * keyed so it only plays once per real insertion.
+ */

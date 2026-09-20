@@ -1,0 +1,105 @@
+/* Base element rules and cross-cutting utility classes — DESIGN.md §2.2, §7, §8. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font: var(--fw-regular) var(--fs-400) / var(--lh-400) var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  user-select: none; /* desktop app, not a document */
+  cursor: default;
+}
+
+/* Text that is genuinely content — titles, URLs, paths, hashes — opts back
+   into normal text interaction; everything else stays chrome. */
+.selectable,
+input,
+textarea {
+  user-select: text;
+  cursor: text;
+}
+
+/* Tabular numerals for every number that changes — percentages, sizes,
+   durations, counts. */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "zero" 1;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+/*
+ * The one shared focus treatment (DESIGN.md §6 preamble): every primitive
+ * applies this class (or an equivalent :focus-visible rule using these same
+ * tokens) and none of them defines a plain :focus ring — a mouse click on a
+ * control in a desktop app must not leave a ring behind.
+ */
+.focusable:focus-visible {
+  outline: var(--ring-w) solid var(--ring-color);
+  outline-offset: var(--ring-offset);
+  border-radius: inherit;
+}
+
+@keyframes helios-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Non-rotational indeterminate pulse — Coordinator ruling §3. Used by
+   Spinner under prefers-reduced-motion instead of rotation. */
+@keyframes helios-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/* prefers-contrast: more — DESIGN.md §8 "Other". Promote hairlines one step
+   and drop tints to solid outlines; components read these same tokens, so
+   this alone covers most of the app.
+   `:root:root:root` is a specificity bump (0,3,0), not a typo: the app
+   stamps `data-theme="dark"` on first run (src/lib/theme.ts), and
+   `:root[data-theme="dark"]` in tokens.css is already (0,2,0) — a plain
+   `:root` here (0,1,0) loses to it regardless of source order, which made
+   this whole block a no-op on the app's default theme. Tripling `:root`
+   only raises specificity; it still matches the same single element, in
+   every theme, so one rule covers all of them. See tokens.css's
+   --border-tier-N comment for why this promotes via those and not
+   var(--border)/var(--border-strong) directly. */
+@media (prefers-contrast: more) {
+  :root:root:root {
+    --border-subtle: var(--border-tier-2);
+    --border: var(--border-tier-3);
+  }
+}
