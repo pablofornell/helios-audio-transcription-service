@@ -1,3 +1,15 @@
+# Pin the Compose project name instead of letting it default to the
+# directory this file sits in. That default is "deploy" -- which every
+# sibling Helios service also gets, because they all keep their compose
+# file in deploy/ too. Two services sharing a project name share their
+# container names, network and, worst of all, their named volumes: bringing
+# this stack up with the default name binds it to whatever
+# deploy_postgres-data another service already initialised, so it fails with
+# `database "helios_ats" does not exist` and, far more dangerous, points
+# this service's migrations at a sibling's database. Naming the project is
+# the whole fix.
+name: helios-ats
+
 services:
   postgres:
     image: postgres:17-alpine
