@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { HeliosError, list, type ListFilter, type Status, type Transcription } from "../../lib";
+import { ACTIVE_POLL_MS, HeliosError, IDLE_POLL_MS, list, type ListFilter, type Status, type Transcription } from "../../lib";
 import { matchesSearch, type StatusFilterValue } from "./helpers";
 
 const PAGE_SIZE = 40;
@@ -43,10 +43,14 @@ export function useLibraryQuery(): UseLibraryQueryResult {
   // Guards against a slow, superseded request (filters changed again while
   // it was in flight) clobbering a newer one's result.
   const requestIdRef = useRef(0);
+  // True once the user has loaded a second page; see the polling effect.
+  const pagedRef = useRef(false);
+
 
   const apiFilter: ListFilter = useMemo(() => ({ status: status as Status | undefined, limit: PAGE_SIZE }), [status]);
 
   const fetchFirstPage = useCallback(() => {
+    pagedRef.current = false;
     const requestId = ++requestIdRef.current;
     setLoading(true);
     setError(undefined);
@@ -69,8 +73,74 @@ export function useLibraryQuery(): UseLibraryQueryResult {
     fetchFirstPage();
   }, [fetchFirstPage]);
 
+  // Derived, not read from a ref: the effect must re-subscribe when this
+  // flips so a job that only just started is polled at the fast cadence
+  // immediately, rather than waiting out the idle timer that was already
+  // scheduled when nothing was running.
+  const hasActiveJob = useMemo(
+    () => items.some((i) => i.status === "pending" || i.status === "running"),
+    [items],
+  );
+
+  // Keep the library live. The sibling service could leave this view alone
+  // because its SSE stream pushed every change; this service has no such
+  // endpoint, so without polling the library is a snapshot frozen at mount
+  // -- submit a file, come back, and a finished job is still shown as
+  // running (or missing entirely). It refreshes on the same cadence as
+  // lib/store.ts, fast while anything is in flight and slow when nothing
+  // is.
+  //
+  // Two things it deliberately does NOT do: it never touches `loading` (a
+  // background refresh must not flash the skeleton over a list the user is
+  // reading), and it stands down entirely once the user has paged past the
+  // first page, because replacing `items` with page one would silently
+  // yank the rest out from under them. Paging is a deliberate act; it wins
+  // until the next explicit refresh or filter change.
+  useEffect(() => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const schedule = () => {
+      timer = setTimeout(run, hasActiveJob ? ACTIVE_POLL_MS : IDLE_POLL_MS);
+    };
+
+    const run = () => {
+      if (stopped || pagedRef.current) {
+        if (!stopped) schedule();
+        return;
+      }
+      const requestId = ++requestIdRef.current;
+      list(apiFilter)
+        .then((page) => {
+          if (stopped || requestId !== requestIdRef.current) return;
+          setItems(page.items);
+          setCursor(page.nextCursor);
+          setHasMore(Boolean(page.nextCursor));
+          setError(undefined);
+        })
+        .catch(() => {
+          // Swallowed on purpose: a failed background poll must not
+          // replace a readable list with an error screen. ConnectionBar
+          // already reports an unreachable server, and the next tick
+          // recovers on its own.
+        })
+        .finally(() => {
+          if (!stopped) schedule();
+        });
+    };
+
+    schedule();
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [apiFilter, hasActiveJob]);
+
   const loadMore = useCallback(() => {
     if (loadingMore || !hasMore || !cursor) return;
+    // Past the first page, the background refresh below stands down -- see
+    // pagedRef.
+    pagedRef.current = true;
     const requestId = requestIdRef.current;
     setLoadingMore(true);
     list({ ...apiFilter, cursor })

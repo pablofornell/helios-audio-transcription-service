@@ -483,15 +483,64 @@ func safeAudioContentType(mediaType string) string {
 // are dropped outright rather than escaped, since none has any legitimate
 // reason to appear in a filename.
 func contentDispositionAttachment(name string) string {
-	var b strings.Builder
+	// Two parameters, deliberately. HTTP header values are ISO-8859-1, so a
+	// non-ASCII rune written straight into filename= is read back byte by
+	// byte as Latin-1: "grabación.ogg" reaches the user as
+	// "grabaciÃ³n.ogg". RFC 6266 answers this with filename*, an RFC 5987
+	// UTF-8 percent-encoding, which every current browser prefers when both
+	// are present. The plain filename= stays as the ASCII-only fallback for
+	// anything that does not understand filename*, so a Spanish or Japanese
+	// upload downloads under a sane name in either case.
+	var ascii strings.Builder
+	needsExtended := false
 	for _, r := range name {
 		if r < 0x20 || r == 0x7f {
 			continue
 		}
-		if r == '"' || r == '\\' {
-			b.WriteByte('\\')
+		if r > 0x7e {
+			// Outside ASCII: represent it in the fallback with '_' and let
+			// filename* carry the real characters.
+			needsExtended = true
+			ascii.WriteByte('_')
+			continue
 		}
-		b.WriteRune(r)
+		if r == '"' || r == '\\' {
+			ascii.WriteByte('\\')
+		}
+		ascii.WriteRune(r)
 	}
-	return `attachment; filename="` + b.String() + `"`
+
+	fallback := ascii.String()
+	if strings.Trim(fallback, "_") == "" {
+		// A name that is entirely non-ASCII would collapse to "____".
+		// Give the fallback something a human can recognise instead.
+		fallback = "download"
+	}
+
+	v := `attachment; filename="` + fallback + `"`
+	if needsExtended {
+		v += `; filename*=UTF-8''` + rfc5987Escape(name)
+	}
+	return v
+}
+
+// rfc5987Escape percent-encodes name per RFC 5987's ext-value: attr-char
+// (ALPHA / DIGIT / "!#$&+-.^_`|~") survives, everything else -- including
+// the space, the quote and every byte of a multi-byte rune -- is escaped.
+// net/url's escapers are all wrong here: QueryEscape turns a space into
+// "+", and PathEscape leaves several characters attr-char does not allow.
+func rfc5987Escape(name string) string {
+	const attrExtra = "!#$&+-.^_`|~"
+	var b strings.Builder
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9',
+			strings.IndexByte(attrExtra, c) >= 0:
+			b.WriteByte(c)
+		default:
+			b.WriteString(fmt.Sprintf("%%%02X", c))
+		}
+	}
+	return b.String()
 }

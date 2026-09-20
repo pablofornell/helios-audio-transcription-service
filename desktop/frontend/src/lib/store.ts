@@ -30,8 +30,8 @@ import type { Transcription } from "./types";
  */
 
 const INITIAL_PAGE_SIZE = 200;
-const ACTIVE_POLL_MS = 1500;
-const IDLE_POLL_MS = 10000;
+export const ACTIVE_POLL_MS = 1500;
+export const IDLE_POLL_MS = 10000;
 
 export interface TranscriptionStoreSnapshot {
   /** All known transcriptions, `createdAt` descending. */
