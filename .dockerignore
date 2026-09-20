@@ -1,0 +1,29 @@
+# Keeps the build context (deploy/Dockerfile's `COPY . .`, context `..`
+# from deploy/docker-compose.yml) down to what the Go build actually needs.
+# Mirrors .gitignore plus VCS metadata docker doesn't need either.
+
+.git/
+.gitignore
+
+# Go build output
+bin/
+dist/
+*.exe
+*.test
+*.out
+
+# Local env / data -- never bake secrets or local data into an image.
+.env
+deploy/.env
+data/
+
+# Model weights are mounted as a volume at runtime, never baked into the
+# image: they dwarf the binary and change independently of it.
+models/
+*.bin
+
+# Editor / OS cruft
+.idea/
+.vscode/
+*.swp
+.DS_Store

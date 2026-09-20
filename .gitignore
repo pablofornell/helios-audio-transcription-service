@@ -1,0 +1,22 @@
+# Go build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Local env / data
+.env
+deploy/.env
+/data
+
+# Whisper model weights. These are hundreds of MB to several GB and are
+# fetched by `make models`, not tracked here.
+/models/
+*.bin
+
+# Editor / OS cruft
+.idea/
+.vscode/
+*.swp
+.DS_Store

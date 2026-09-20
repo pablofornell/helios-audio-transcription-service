@@ -1,0 +1,178 @@
+# HELIOS-ATS
+
+**HELIOS-ATS** (Audio Transcription Service) accepts an audio file upload, stores it,
+and asynchronously produces a precise transcript using **whisper.cpp** — segments,
+word-level timestamps, language auto-detection and translation to English are all
+supported. Helios is this organisation's domain for data extraction and manipulation
+in general; ATS is this one service inside that domain, not the domain itself — the
+compound name keeps the two apart. It ships as a single Go binary: a REST API plus a
+Postgres-backed job queue and worker pool, in one process.
+
+## Prerequisites
+
+To run the **service**:
+
+- [Docker](https://docs.docker.com/get-docker/) + Docker Compose.
+
+`ffmpeg`/`ffprobe` are baked into the service's container image
+(`deploy/Dockerfile`). `whisper-cli` and its model weights are **not** — whisper.cpp
+model files are large (hundreds of MB to a few GB each) and licensed/distributed
+separately, so they are provisioned once, out of band, rather than baked into the
+image. See `docs/RUNBOOK.md`'s **Prerequisites** for exactly how.
+
+To build from source: **Go 1.27** (`go.mod` pins `go 1.27`, built and tested against
+`go1.27.1`).
+
+## Quickstart
+
+```
+cp deploy/.env.example deploy/.env
+docker compose -f deploy/docker-compose.yml up -d --build
+```
+
+(or `make compose-up` from the repo root — same thing; `make compose-logs` /
+`make compose-down` alongside it.) This brings up Postgres and
+`helios-transcription-api`, applying its database migrations automatically on
+startup. Once it's up:
+
+```
+curl -s localhost:7462/healthz   # 200, empty body: process is alive
+curl -s localhost:7462/readyz    # 200 + JSON: worker pool (and every other registered check) healthy
+```
+
+Submit a file and grab its id. `file` and `options` may be given in either order (curl above
+sends `file` first, then `options`, since that reads naturally) — the API honours `options`
+wherever it lands in the request:
+
+```
+curl -s -X POST localhost:7462/api/v1/transcriptions \
+  -F file=@interview.mp3 \
+  -F 'options={"wordTimestamps":true}'
+```
+
+```json
+{
+  "id": "7e3c2c1a-9e0b-4f2a-8a3a-1a2b3c4d5e6f",
+  "status": "pending",
+  "options": {
+    "model": "base",
+    "language": "",
+    "task": "transcribe",
+    "wordTimestamps": true,
+    "initialPrompt": "",
+    "beamSize": 5,
+    "temperature": 0
+  },
+  "audio": {
+    "filename": "interview.mp3",
+    "mediaType": "audio/mpeg",
+    "sizeBytes": 3481200,
+    "durationSeconds": 0,
+    "sampleRateHz": 0,
+    "channels": 0,
+    "codec": ""
+  },
+  "attempts": 0,
+  "maxAttempts": 3,
+  "createdAt": "2026-09-20T10:15:03.128Z",
+  "updatedAt": "2026-09-20T10:15:03.128Z"
+}
+```
+
+Poll until it resolves (`audio.*` fills in once a worker has probed the file; `result`
+appears once it succeeds):
+
+```
+curl -s localhost:7462/api/v1/transcriptions/7e3c2c1a-9e0b-4f2a-8a3a-1a2b3c4d5e6f | jq '{status, audio, result}'
+```
+
+```json
+{
+  "status": "succeeded",
+  "audio": {
+    "filename": "interview.mp3",
+    "mediaType": "audio/mpeg",
+    "sizeBytes": 3481200,
+    "durationSeconds": 214.32,
+    "sampleRateHz": 44100,
+    "channels": 2,
+    "codec": "mp3"
+  },
+  "result": {
+    "text": "Thanks for joining me today. Let's start with...",
+    "language": "en",
+    "durationSeconds": 214.32,
+    "model": "base",
+    "task": "transcribe",
+    "segments": [
+      {"id": 0, "start": 0.0, "end": 3.2, "text": "Thanks for joining me today."}
+    ]
+  }
+}
+```
+
+Or fetch the transcript directly, in whichever format you need:
+
+```
+curl -s 'localhost:7462/api/v1/transcriptions/7e3c2c1a-9e0b-4f2a-8a3a-1a2b3c4d5e6f/transcript?format=srt' -o interview.srt
+```
+
+## Configuration at a glance
+
+Every setting is an environment variable prefixed `HELIOS_`, loaded and validated at
+startup by `internal/config`. The full list, with every default, lives in
+[`deploy/.env.example`](deploy/.env.example) — copy it to `deploy/.env` for Compose, or
+export the variables directly for `go run`/`make run`. The ones worth knowing up front:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `HELIOS_HTTP_ADDR` | `:7462` | Listen address. |
+| `HELIOS_DATABASE_DSN` | `postgres://helios:helios@localhost:5432/helios_ats?sslmode=disable` | Postgres connection string. Never logged in full. |
+| `HELIOS_STORAGE_ROOT_DIR` | `/data` | Where uploaded sources and in-progress normalized WAVs are written. |
+| `HELIOS_STORAGE_MIN_FREE_BYTES` | `1073741824` (1 GiB) | Uploads are refused once free space on this volume drops below it. |
+| `HELIOS_TRANSCRIBER_KIND` | `whispercpp` | `whispercpp` for real transcription via the `whisper-cli` subprocess, `fake` for a deterministic, no-subprocess double (tests, local dev). |
+| `HELIOS_TRANSCRIBER_MODEL_DIR` | `/models` | Holds `ggml-<model>.bin` weight files — see `docs/RUNBOOK.md`. |
+| `HELIOS_TRANSCRIBER_DEFAULT_MODEL` | `base` | Used when a submission's `options.model` is empty. |
+| `HELIOS_TRANSCRIBER_ALLOWED_MODELS` | `tiny,base,small,medium,large-v3` | Comma-separated allow-list `options.model` must belong to when non-empty. |
+| `HELIOS_WORKER_CONCURRENCY` | `2` | How many transcriptions run at once per process. |
+| `HELIOS_AUDIO_MAX_DURATION` | `4h` | Audio longer than this is rejected (at probe time — see `docs/ARCHITECTURE.md`). |
+| `HELIOS_RETENTION_MAX_AGE` | `168h` (7 days) | How old a terminal (succeeded/failed/canceled) transcription must be before the retention sweep deletes it — database row and files both. See `docs/RUNBOOK.md`. |
+
+**Why `HELIOS_`, not `ATS_`.** These variables, the `helios_`-prefixed Prometheus
+metrics on `/metrics`, the `github.com/pablofornell/helios-audio-transcription-service`
+module path, and the `helios-transcription-api` binary all keep the domain's name
+rather than the service's. That's deliberate, not a leftover from before the service
+had its own name: the prefix names Helios, the domain this service lives in, shared
+across every sibling service — not this one service alone. Don't rename them to
+`ATS_`/`ats_`; it would just break every environment that reads them for no benefit.
+
+## Things to know before you start
+
+**Transcription is asynchronous — `POST /transcriptions` always returns 202, never a
+finished result.** A single job can take minutes of CPU-bound work (`large-v3` on an
+hour of audio, in particular); the endpoint validates the request, stores the upload
+and queues it, then a worker in the same process runs the actual pipeline. Poll
+`GET /transcriptions/{id}` (or build a client that does) until `status` reaches
+`succeeded`, `failed` or `canceled` — there is no webhook and no SSE stream.
+
+**Model weights are your responsibility, not ATS's.** Nothing here downloads
+`ggml-<model>.bin` files automatically — see `docs/RUNBOOK.md`'s **Prerequisites**
+before submitting anything against a model you haven't fetched. A job that requests a
+model with no matching file on disk fails individually with
+`error.code: "model_unavailable"`, not a startup error, since ATS has no way to know
+which models you'll actually ask for until you ask.
+
+**Speaker diarization is out of scope.** ATS produces segments and, optionally,
+word-level timestamps — never speaker labels. There is also no authentication layer:
+ATS is designed to sit behind whatever perimeter (reverse proxy, network policy) an
+operator already runs in front of internal services, and storage is a single local
+filesystem volume, not a distributed object store — see `docs/ARCHITECTURE.md`'s
+**Trade-offs and current limitations** for the full list.
+
+## More
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — how the pieces fit together, for
+  anyone about to change the code.
+- [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — for anyone operating it.
+- [`docs/openapi.yaml`](docs/openapi.yaml) — the HTTP API contract.
+- `make help` — every `make` target.

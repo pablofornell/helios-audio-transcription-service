@@ -1,0 +1,771 @@
+openapi: 3.1.0
+info:
+  title: HELIOS-ATS Transcription API
+  version: "1"
+  description: >
+    Upload an audio file, wait for whisper.cpp to transcribe it, poll for the result.
+    This is the contract internal/httpapi implements — every route, schema and status
+    code below is generated from the real Go types (internal/domain, internal/httpapi's
+    DTOs) rather than invented. Errors always use the envelope in ErrorResponse.
+
+
+    ## Error code → HTTP status mapping
+
+
+    This is the single source of truth for how a domain.ErrorCode (see
+    internal/domain/errors.go) maps to an HTTP status when it is surfaced
+    synchronously as an ErrorResponse. Every ErrorCode has exactly one status here.
+    Note that `unsupported_media` and `no_audio_stream` are never returned by any
+    operation in this document directly — ffprobe only runs once a job is claimed by a
+    worker, well after POST /transcriptions has already returned 202 — they only ever
+    appear inside a *stored* Transcription's `error` field (a 200 response body from GET
+    /transcriptions/{id}).
+
+
+    | ErrorCode           | HTTP status                   |
+    |----------------------|--------------------------------|
+    | `invalid_input`      | 400 Bad Request                |
+    | `unsupported_media`  | 415 Unsupported Media Type     |
+    | `no_audio_stream`    | 422 Unprocessable Content       |
+    | `payload_too_large`  | 413 Content Too Large           |
+    | `not_found`          | 404 Not Found                   |
+    | `conflict`           | 409 Conflict                    |
+    | `disk_full`          | 507 Insufficient Storage        |
+    | `model_unavailable`  | 503 Service Unavailable         |
+    | `tool_failure`       | 502 Bad Gateway                 |
+    | `timeout`            | 504 Gateway Timeout             |
+    | `canceled`           | 499 (nginx's "client closed request"; not a registered IANA status, but the one this API returns) |
+    | `internal`           | 500 Internal Server Error       |
+servers:
+  - url: /api/v1
+tags:
+  - name: transcriptions
+  - name: operations
+
+paths:
+  /transcriptions:
+    post:
+      tags: [transcriptions]
+      operationId: submitTranscription
+      summary: Upload an audio file for transcription.
+      description: >
+        multipart/form-data with two parts: a required `file` part (the audio itself —
+        any container/codec ffprobe can demux; rejected later, per-job, if it has no
+        audio stream) and an optional `options` part, a JSON-encoded object matching
+        Options. An absent or empty `options` part applies domain.DefaultOptions()
+        (transcribe, auto-detect language, beam size 5). Parts are read in request
+        order and `options` must come before `file` if both are sent — internal/httpapi
+        never buffers the whole request to look ahead. Returns 202 immediately: the job
+        is queued as `status: "pending"`, not run synchronously — see
+        docs/ARCHITECTURE.md for why.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: >
+                    The audio file. Its filename is sanitized (directory components and
+                    control characters stripped, capped at 255 bytes) before being
+                    stored as Audio.filename; the original bytes are stored verbatim at
+                    transcriptions/<id>/source<ext>.
+                options:
+                  type: string
+                  contentMediaType: application/json
+                  description: >
+                    JSON-encoded object matching the Options schema. Every field is
+                    optional; an empty Model means "use the configured default model"
+                    (HELIOS_TRANSCRIBER_DEFAULT_MODEL).
+            encoding:
+              file:
+                contentType: "*/*"
+              options:
+                contentType: application/json
+      responses:
+        "202":
+          description: >
+            Accepted. The job has been validated, streamed to storage and queued as
+            `status: "pending"`. The Location header and the response body's `id` name
+            the same resource.
+          headers:
+            Location:
+              description: "/api/v1/transcriptions/{id} of the newly created job."
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transcription"
+        "400":
+          description: >
+            Invalid input — malformed multipart body, malformed `options` JSON, an
+            invalid Options field (e.g. beamSize out of [1,16], an unknown model when
+            HELIOS_TRANSCRIBER_ALLOWED_MODELS is non-empty), or the `file` part is
+            missing entirely. ErrorCode invalid_input.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: >
+            The upload exceeds HELIOS_HTTP_MAX_UPLOAD_BYTES. ErrorCode
+            payload_too_large.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Unclassified internal failure. ErrorCode internal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "507":
+          description: >
+            Free space on HELIOS_STORAGE_ROOT_DIR's volume is at or below
+            HELIOS_STORAGE_MIN_FREE_BYTES; the submission was rejected before anything
+            was written rather than queued to fail later. ErrorCode disk_full.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    get:
+      tags: [transcriptions]
+      operationId: listTranscriptions
+      summary: List transcriptions, most recently created first.
+      parameters:
+        - name: status
+          in: query
+          description: Restrict the listing to one Status. Omitted means every status.
+          schema:
+            $ref: "#/components/schemas/Status"
+        - $ref: "#/components/parameters/Cursor"
+        - name: limit
+          in: query
+          description: >
+            Page size. Zero, negative or omitted defaults to 20; anything above 100 is
+            clamped to 100 rather than rejected. A non-integer value is rejected with
+            400.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListTranscriptionsResponse"
+        "400":
+          description: >
+            `limit` is not a valid integer, `status` is not a recognised Status value,
+            or `cursor` is not a token this server issued. ErrorCode invalid_input.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /transcriptions/{id}:
+    parameters:
+      - $ref: "#/components/parameters/TranscriptionID"
+    get:
+      tags: [transcriptions]
+      operationId: getTranscription
+      summary: Fetch a single transcription.
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transcription"
+        "400":
+          description: "{id} is not a valid UUID. ErrorCode invalid_input."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No transcription with this id exists. ErrorCode not_found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags: [transcriptions]
+      operationId: deleteTranscription
+      summary: Delete a transcription's row and stored files.
+      description: >
+        Unconditional: deletes the database row (regardless of its current Status —
+        deleting a still-running job is allowed, and does not first cancel it) and then
+        best-effort removes its files under HELIOS_STORAGE_ROOT_DIR. Deleting an id that
+        does not exist is **not** an error — the underlying DELETE affects zero rows
+        either way and app.Service.Delete does not distinguish the two cases — so this
+        endpoint returns 204 whether or not {id} ever existed, as long as it is a
+        well-formed UUID.
+      responses:
+        "204":
+          description: Deleted (or already absent).
+        "400":
+          description: "{id} is not a valid UUID. ErrorCode invalid_input."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /transcriptions/{id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/TranscriptionID"
+    post:
+      tags: [transcriptions]
+      operationId: cancelTranscription
+      summary: Request that a pending or running transcription stop.
+      description: >
+        A pending job is canceled outright. A running job is flagged
+        (`cancel_requested`) and its worker discovers this at its next lease heartbeat
+        (HELIOS_WORKER_HEARTBEAT_INTERVAL) — see docs/ARCHITECTURE.md's lease protocol.
+        Either way the returned Transcription reflects the new state immediately for a
+        pending job; for a running one, `status` may still read `"running"` for up to
+        one heartbeat interval until the worker actually stops.
+      responses:
+        "200":
+          description: OK. The transcription is canceled (pending) or transitioning to canceled (running).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transcription"
+        "400":
+          description: "{id} is not a valid UUID. ErrorCode invalid_input."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No transcription with this id exists. ErrorCode not_found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The transcription is already in a terminal Status. ErrorCode conflict.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /transcriptions/{id}/retry:
+    parameters:
+      - $ref: "#/components/parameters/TranscriptionID"
+    post:
+      tags: [transcriptions]
+      operationId: retryTranscription
+      summary: Manually re-queue a failed or canceled transcription.
+      description: >
+        Only legal from `status: "failed"` or `status: "canceled"` — every other status
+        is 409. Resets `attempts` to 0 and clears the previous `error`, so a job that
+        failed after exhausting its automatic retries gets a fresh set of attempts.
+      responses:
+        "200":
+          description: OK. The transcription is queued again as status="pending".
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transcription"
+        "400":
+          description: "{id} is not a valid UUID. ErrorCode invalid_input."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No transcription with this id exists. ErrorCode not_found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The transcription is not failed or canceled. ErrorCode conflict.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /transcriptions/{id}/transcript:
+    parameters:
+      - $ref: "#/components/parameters/TranscriptionID"
+    get:
+      tags: [transcriptions]
+      operationId: getTranscript
+      summary: Fetch the finished transcript in one of four formats.
+      description: >
+        Only legal once `status: "succeeded"` — every other status is 409, including
+        `"failed"` (see Transcription.error instead) and `"pending"`/`"running"` (poll
+        GET /transcriptions/{id} until it resolves). `format` is validated before {id}
+        is even looked up, so an unknown format is rejected the same way whether or not
+        the transcription exists.
+      parameters:
+        - name: format
+          in: query
+          description: Defaults to json.
+          schema:
+            $ref: "#/components/schemas/TranscriptFormat"
+      responses:
+        "200":
+          description: >
+            The transcript in the requested format. txt/srt/vtt responses also carry a
+            `Content-Disposition: attachment; filename="<id>.<format>"` header; json
+            does not.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Result"
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+                description: The full transcript text, no timing.
+            application/x-subrip; charset=utf-8:
+              schema:
+                type: string
+                description: SubRip (.srt) subtitle file, CRLF line endings.
+            text/vtt; charset=utf-8:
+              schema:
+                type: string
+                description: WebVTT (.vtt) subtitle file.
+        "400":
+          description: "{id} is not a valid UUID, or format is not one of json/txt/srt/vtt. ErrorCode invalid_input."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No transcription with this id exists. ErrorCode not_found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The transcription has not succeeded (yet, or ever). ErrorCode conflict.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /transcriptions/{id}/audio:
+    parameters:
+      - $ref: "#/components/parameters/TranscriptionID"
+    get:
+      tags: [transcriptions]
+      operationId: getTranscriptionAudio
+      summary: Stream the originally uploaded audio file. Supports byte-range requests.
+      description: >
+        Streams the untouched upload (transcriptions/<id>/source<ext>), not the
+        normalized WAV whisper.cpp consumed — that file is deleted once its job
+        finishes (see docs/ARCHITECTURE.md). Served via net/http's ServeContent, so
+        Range requests, conditional GETs and Content-Type sniffing from the stored
+        Audio.mediaType all work for free.
+      parameters:
+        - name: Range
+          in: header
+          description: Standard HTTP Range header, e.g. "bytes=0-1023".
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The full file, when no Range header was sent.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: A byte range of the file, when a satisfiable Range header was sent.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: "{id} is not a valid UUID. ErrorCode invalid_input."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: >
+            The transcription does not exist, or its stored source file is gone.
+            ErrorCode not_found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "416":
+          description: >
+            The Range header names a byte range outside [0, file size) — an
+            unsatisfiable range. The Content-Range response header reports the actual
+            size, per RFC 9110 §14.4.
+
+
+            This is the one response on this endpoint with no ErrorResponse body: the
+            range check happens inside net/http's ServeContent, below the handler, so
+            the body is its plain-text message rather than the JSON envelope every
+            other error here uses.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "invalid range: failed to overlap"
+
+  /healthz:
+    servers:
+      - url: /
+    get:
+      tags: [operations]
+      operationId: healthz
+      summary: Liveness probe.
+      description: >
+        Served at the root, not under /api/v1 — matching deploy/Dockerfile's
+        HEALTHCHECK. Unconditionally 200 the instant the process can answer HTTP at
+        all; it never consults the database, storage or the transcriber — that is what
+        /readyz is for.
+      responses:
+        "200":
+          description: The process is alive.
+
+  /readyz:
+    servers:
+      - url: /
+    get:
+      tags: [operations]
+      operationId: readyz
+      summary: Readiness probe (every registered HealthChecker, aggregated).
+      description: Served at the root, not under /api/v1 — see the note on /healthz.
+      responses:
+        "200":
+          description: Ready to serve traffic — every registered check passed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyReport"
+        "503":
+          description: Not ready — at least one registered check failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyReport"
+
+  /metrics:
+    servers:
+      - url: /
+    get:
+      tags: [operations]
+      operationId: metrics
+      summary: Prometheus text-format metrics, when HELIOS_OBSERVABILITY_METRICS_ENABLED is true.
+      description: >
+        Served at the root, not under /api/v1 — see the note on /healthz. Every series
+        this service exports is prefixed `helios_`; not mounted at all when metrics are
+        disabled (a request then falls through chi's router to its default 404, not an
+        ErrorResponse envelope).
+      responses:
+        "200":
+          description: OK.
+          content:
+            text/plain:
+              schema:
+                type: string
+
+components:
+  parameters:
+    TranscriptionID:
+      name: id
+      in: path
+      required: true
+      description: Must be a valid UUID; a non-UUID value is rejected with 400 (ErrorCode invalid_input).
+      schema:
+        type: string
+        format: uuid
+
+    Cursor:
+      name: cursor
+      in: query
+      description: >
+        An opaque pagination token from a previous ListTranscriptionsResponse's
+        nextCursor. Callers must not construct or parse it: it encodes a
+        base64url("<createdAt RFC3339Nano>|<id>") pair, not a bare timestamp, because
+        transcriptions submitted in the same batch can share a createdAt down to the
+        microsecond, and a timestamp-only cursor would skip or repeat them at a page
+        boundary. An undecodable value is rejected with 400 (ErrorCode invalid_input).
+        Omitted means start from the newest.
+      schema:
+        type: string
+
+  schemas:
+    Status:
+      type: string
+      description: >
+        The job lifecycle: pending -> running -> (succeeded | failed | canceled), with
+        running -> pending an automatic retry, and failed|canceled -> pending a manual
+        one (POST .../retry). See domain.Status.CanTransitionTo.
+      enum: [pending, running, succeeded, failed, canceled]
+
+    Task:
+      type: string
+      enum: [transcribe, translate]
+
+    TranscriptFormat:
+      type: string
+      default: json
+      enum: [json, txt, srt, vtt]
+
+    ErrorCode:
+      type: string
+      description: See this document's top-level description for the error code → HTTP status mapping.
+      enum:
+        - invalid_input
+        - unsupported_media
+        - no_audio_stream
+        - payload_too_large
+        - not_found
+        - conflict
+        - disk_full
+        - model_unavailable
+        - tool_failure
+        - timeout
+        - canceled
+        - internal
+
+    Options:
+      type: object
+      description: >
+        Mirrors internal/domain.Options field for field. Every field is optional on
+        submission: an absent or zero value is filled in by Options.Normalize before
+        validation (an empty task becomes "transcribe", a zero beamSize becomes 5, an
+        empty or "auto" language means auto-detect).
+      properties:
+        model:
+          type: string
+          description: >
+            Whisper model name, e.g. "base", "large-v3". Empty means the configured
+            default (HELIOS_TRANSCRIBER_DEFAULT_MODEL). When
+            HELIOS_TRANSCRIBER_ALLOWED_MODELS is non-empty, a non-empty value must be
+            one of that list.
+        language:
+          type: string
+          description: ISO-639-1/639-2 code (2-3 lowercase letters). Empty or "auto" means auto-detect.
+        task:
+          $ref: "#/components/schemas/Task"
+          default: transcribe
+        wordTimestamps:
+          type: boolean
+          default: false
+          description: Emit per-word timings (Segment.words) in addition to per-segment ones.
+        initialPrompt:
+          type: string
+          description: Context hint fed to the decoder (proper nouns, jargon). Max 1024 bytes.
+        beamSize:
+          type: integer
+          default: 5
+          minimum: 1
+          maximum: 16
+        temperature:
+          type: number
+          format: double
+          default: 0.0
+          minimum: 0.0
+          maximum: 1.0
+
+    Audio:
+      type: object
+      description: >
+        Mirrors internal/domain.Audio field for field. durationSeconds, sampleRateHz,
+        channels and codec are all zero/"" until the worker's ffprobe step has run
+        (i.e. for any transcription still status="pending").
+      properties:
+        filename:
+          type: string
+          description: Sanitized original filename (base name only, no path).
+        mediaType:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+        durationSeconds:
+          type: number
+          format: double
+        sampleRateHz:
+          type: integer
+        channels:
+          type: integer
+        codec:
+          type: string
+
+    Word:
+      type: object
+      description: One whisper.cpp token merged into a whole word, present only when Options.wordTimestamps was set.
+      properties:
+        word:
+          type: string
+        start:
+          type: number
+          format: double
+          description: Seconds from the start of the audio.
+        end:
+          type: number
+          format: double
+        probability:
+          type: number
+          format: double
+          description: Whisper's confidence, 0..1. 0 when the engine gives none.
+
+    Segment:
+      type: object
+      description: One contiguous span of transcript text as whisper.cpp produced it.
+      properties:
+        id:
+          type: integer
+          description: 0-based position within Result.segments.
+        start:
+          type: number
+          format: double
+        end:
+          type: number
+          format: double
+        text:
+          type: string
+        words:
+          type: array
+          description: Present only when the request had Options.wordTimestamps set.
+          items:
+            $ref: "#/components/schemas/Word"
+
+    Result:
+      type: object
+      description: >
+        The finished transcript of a succeeded job. Mirrors internal/domain.Result
+        field for field; this is exactly what GET .../transcript?format=json returns.
+      properties:
+        text:
+          type: string
+          description: Every Segment's text, space-normalized and joined.
+        language:
+          type: string
+          description: Detected (Options.language empty/auto) or forced ISO-639-1 code whisper-cli actually used.
+        durationSeconds:
+          type: number
+          format: double
+        model:
+          type: string
+          description: The whisper model name actually used (resolved from Options.model or the configured default).
+        task:
+          $ref: "#/components/schemas/Task"
+        segments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Segment"
+
+    Error:
+      type: object
+      description: The shape of both a stored Transcription's `error` field and the top-level ErrorResponse envelope's `error` body.
+      required: [code, message]
+      properties:
+        code:
+          $ref: "#/components/schemas/ErrorCode"
+        message:
+          type: string
+          description: Safe to display to an API caller.
+        details:
+          type: object
+          additionalProperties: true
+          description: >-
+            Structured, machine-readable context, e.g. field="beamSize", or
+            exitCode=1 and a stderr tail.
+
+    Transcription:
+      type: object
+      description: >
+        Mirrors internal/httpapi's transcriptionDTO (itself a field-for-field mirror of
+        internal/domain.Transcription minus its queue/storage-only fields — SourcePath,
+        LeaseOwner, LeaseExpiresAt, NextAttemptAt are never API surface). `result` is
+        present only once status="succeeded"; `error` is present once the most recent
+        attempt failed (which can still be true on a status="pending" row awaiting
+        automatic retry — see docs/ARCHITECTURE.md's retry policy).
+      required: [id, status, options, audio, attempts, maxAttempts, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/Status"
+        options:
+          $ref: "#/components/schemas/Options"
+        audio:
+          $ref: "#/components/schemas/Audio"
+        result:
+          $ref: "#/components/schemas/Result"
+        error:
+          $ref: "#/components/schemas/Error"
+        attempts:
+          type: integer
+          description: How many times a worker has tried to run this job.
+        maxAttempts:
+          type: integer
+          description: Ceiling on attempts before the job is marked permanently failed, from HELIOS_WORKER_MAX_ATTEMPTS at submission time.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: string
+          format: date-time
+          description: When a worker first began running this job. Absent until then.
+        completedAt:
+          type: string
+          format: date-time
+          description: When this job reached a terminal status. Absent until then.
+
+    ListTranscriptionsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Transcription"
+        nextCursor:
+          type: string
+          description: Opaque token for the next page. Absent when the listing is exhausted. See the cursor query parameter.
+
+    CheckResult:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        detail:
+          type: string
+          description: Short human-readable diagnostic text, present whether ok is true or false.
+
+    ReadyReport:
+      type: object
+      required: [ok, checks]
+      properties:
+        ok:
+          type: boolean
+          description: True only if every registered HealthChecker passed.
+        checks:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/CheckResult"
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/Error"

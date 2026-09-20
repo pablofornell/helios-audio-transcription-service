@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-helios}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-helios}
+      POSTGRES_DB: ${POSTGRES_DB:-helios_ats}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-helios} -d ${POSTGRES_DB:-helios_ats}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  helios:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # .env is gitignored, so it will not exist on a fresh clone. required:
+    # false keeps `docker compose up`/`config` working without it -- copy
+    # deploy/.env.example to deploy/.env to override any default.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Inside compose the DSN is not an operator secret -- it is derived
+      # from the postgres service above, so the stack comes up working on a
+      # clean checkout instead of starting and then dying on "DSN is
+      # required". internal/config still refuses to default it outside
+      # compose, where it genuinely is a deployment choice. Anything in
+      # deploy/.env overrides this.
+      HELIOS_DATABASE_DSN: ${HELIOS_DATABASE_DSN:-postgres://${POSTGRES_USER:-helios}:${POSTGRES_PASSWORD:-helios}@postgres:5432/${POSTGRES_DB:-helios_ats}?sslmode=disable}
+      HELIOS_STORAGE_ROOT_DIR: ${HELIOS_STORAGE_ROOT_DIR:-/data}
+      HELIOS_TRANSCRIBER_MODEL_DIR: ${HELIOS_TRANSCRIBER_MODEL_DIR:-/models}
+    ports:
+      - "7462:7462"
+    volumes:
+      - helios-data:/data
+      # Bind-mounted, not a named volume: `make models` (scripts/fetch-
+      # models.sh) downloads weights into ../models on the HOST, relative
+      # to this file's own directory (deploy/) -- see its own doc. A named
+      # volume here would start empty and never see those files, so a
+      # fresh `make compose-up` would have no weights and every job would
+      # fail with model_unavailable. :ro because the running container has
+      # no business writing into it -- only `make models`, on the host,
+      # ever does.
+      - ../models:/models:ro
+
+volumes:
+  postgres-data:
+  helios-data:
