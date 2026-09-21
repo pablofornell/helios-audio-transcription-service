@@ -86,6 +86,14 @@ type RouterDeps struct {
 	RouteTimeout time.Duration
 	// MetricsEnabled toggles whether /metrics is mounted at all.
 	MetricsEnabled bool
+	// CORSAllowedOrigins feeds newCORSMiddleware -- empty (the default)
+	// disables CORS handling entirely, byte-for-byte the same behaviour
+	// this router had before HELIOS_CORS_ALLOWED_ORIGINS existed. Read
+	// this only after config.Config.Validate has normalised it (see that
+	// field's own doc) -- cmd/helios-transcription-api/wire passes
+	// cfg.CORS.AllowedOrigins straight through, after Load already ran
+	// Validate.
+	CORSAllowedOrigins []string
 }
 
 // NewRouter builds the chi.Router serving CONTRACT.md section 6's route
@@ -99,27 +107,33 @@ type RouterDeps struct {
 //     so every middleware after it, and every handler, can read one.
 //  2. chimw.RealIP      -- trusts X-Forwarded-For/X-Real-IP to fix up
 //     r.RemoteAddr before anything logs or traces it.
-//  3. otelhttp          -- opens this request's span early, so every
+//  3. CORS              -- newCORSMiddleware(deps.CORSAllowedOrigins),
+//     disabled (a no-op passthrough) unless HELIOS_CORS_ALLOWED_ORIGINS is
+//     set. Sits this early so an allowed preflight is answered, and every
+//     other response gets its Access-Control-* headers, before anything
+//     below even runs -- see that middleware's own doc for why a preflight
+//     never needs a route of its own.
+//  4. otelhttp          -- opens this request's span early, so every
 //     downstream log line and metric can be correlated to a trace id, and
 //     so the span's duration covers the whole stack below it, not just
 //     the handler.
-//  4. requestLogger     -- seeds the context with the configured logger
+//  5. requestLogger     -- seeds the context with the configured logger
 //     and this request's id (observability.WithRequestID), then defers
 //     one access-log line for when the response is final.
-//  5. recoverer         -- catches a panic from anything below it
+//  6. recoverer         -- catches a panic from anything below it
 //     (metrics middleware, the router, or a handler) and turns it into a
 //     clean 500 error envelope. It sits *inside* requestLogger
 //     deliberately: by recovering before requestLogger's own deferred log
 //     runs, that log line -- which already carries this request's id via
-//     step 4 -- is the one line an operator needs to find a panic,
+//     step 5 -- is the one line an operator needs to find a panic,
 //     without a second, separate "logged from the panic handler" line to
 //     correlate by hand.
-//  6. metrics           -- records one ObserveHTTP call per request. It
+//  7. metrics           -- records one ObserveHTTP call per request. It
 //     sits *inside* recoverer so a panic is still recorded (with a 500,
 //     via a recover/re-panic of its own -- see metricsMiddleware) rather
 //     than silently missing from /metrics, while recoverer still gets to
 //     handle the panic itself.
-//  7. chimw.Timeout     -- bounds how long a handler may run. It is
+//  8. chimw.Timeout     -- bounds how long a handler may run. It is
 //     innermost (closest to the handler) so requestLogger, recoverer and
 //     metrics all still see its 504 like any other response. It is
 //     applied per-route below, under /api/v1 only, so /healthz, /readyz
@@ -130,6 +144,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 	r.Use(
 		chimw.RequestID,
 		chimw.RealIP,
+		newCORSMiddleware(deps.CORSAllowedOrigins),
 		observability.HTTPMiddleware(deps.TracerProvider, otelServiceName),
 		newRequestLogger(deps.Logger),
 		recoverer,

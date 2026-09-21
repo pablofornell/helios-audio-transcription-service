@@ -297,6 +297,119 @@ func TestValidate_TracingRequiresOTLPEndpoint(t *testing.T) {
 	})
 }
 
+func TestValidate_CORSAllowedOrigins(t *testing.T) {
+	t.Run("empty (disabled) is accepted", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CORS.AllowedOrigins = nil
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("a well-formed origin is accepted", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CORS.AllowedOrigins = []string{"https://ats.example.com", "http://localhost:5173"}
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("wildcard is rejected", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CORS.AllowedOrigins = []string{"*"}
+		assert.Error(t, cfg.Validate())
+	})
+
+	t.Run("a scheme other than http/https is rejected", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CORS.AllowedOrigins = []string{"ftp://example.com"}
+		assert.Error(t, cfg.Validate())
+	})
+
+	t.Run("a path is rejected", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CORS.AllowedOrigins = []string{"https://example.com/app"}
+		assert.Error(t, cfg.Validate())
+	})
+
+	t.Run("a bare host with no scheme is rejected", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CORS.AllowedOrigins = []string{"example.com"}
+		assert.Error(t, cfg.Validate())
+	})
+}
+
+// TestValidate_CORSAllowedOrigins_Normalizes guards against the exact
+// mismatch a real deployment hit: a perfectly well-formed origin an
+// operator typed with an explicit default port or mixed-case host/scheme
+// must still match the lowercase, default-port-stripped form a real
+// browser's Origin header always arrives in — see normalizeCORSOrigin's
+// own doc. Validate must rewrite c.CORS.AllowedOrigins in place so
+// httpapi's exact-match lookup actually sees the normalised form.
+func TestValidate_CORSAllowedOrigins_Normalizes(t *testing.T) {
+	t.Run("an explicit default port is stripped", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CORS.AllowedOrigins = []string{"https://ats.home.lan:443"}
+		require.NoError(t, cfg.Validate())
+		assert.Equal(t, []string{"https://ats.home.lan"}, cfg.CORS.AllowedOrigins)
+	})
+
+	t.Run("an explicit http default port (80) is stripped", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CORS.AllowedOrigins = []string{"http://localhost:80"}
+		require.NoError(t, cfg.Validate())
+		assert.Equal(t, []string{"http://localhost"}, cfg.CORS.AllowedOrigins)
+	})
+
+	t.Run("scheme and host are lowercased", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CORS.AllowedOrigins = []string{"HTTPS://ATS.home.lan"}
+		require.NoError(t, cfg.Validate())
+		assert.Equal(t, []string{"https://ats.home.lan"}, cfg.CORS.AllowedOrigins)
+	})
+
+	t.Run("an IPv6 literal keeps its brackets", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CORS.AllowedOrigins = []string{"http://[::1]:8080", "https://[FE80::1]:443"}
+		require.NoError(t, cfg.Validate())
+		assert.Equal(t, []string{"http://[::1]:8080", "https://[fe80::1]"}, cfg.CORS.AllowedOrigins)
+		// Idempotent: a second pass must not mangle the normalised form.
+		require.NoError(t, cfg.Validate())
+		assert.Equal(t, []string{"http://[::1]:8080", "https://[fe80::1]"}, cfg.CORS.AllowedOrigins)
+	})
+
+	t.Run("a zero-padded default port is still stripped", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CORS.AllowedOrigins = []string{"https://ats.home.lan:0443"}
+		require.NoError(t, cfg.Validate())
+		assert.Equal(t, []string{"https://ats.home.lan"}, cfg.CORS.AllowedOrigins)
+	})
+
+	t.Run("a non-default port is preserved", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CORS.AllowedOrigins = []string{"https://example.com:8443"}
+		require.NoError(t, cfg.Validate())
+		assert.Equal(t, []string{"https://example.com:8443"}, cfg.CORS.AllowedOrigins)
+	})
+
+	t.Run("an http origin's non-default port is preserved", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CORS.AllowedOrigins = []string{"http://localhost:5173"}
+		require.NoError(t, cfg.Validate())
+		assert.Equal(t, []string{"http://localhost:5173"}, cfg.CORS.AllowedOrigins)
+	})
+
+	t.Run("https default port and http default port are not cross-applied", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CORS.AllowedOrigins = []string{"https://example.com:80", "http://example.com:443"}
+		require.NoError(t, cfg.Validate())
+		assert.Equal(t, []string{"https://example.com:80", "http://example.com:443"}, cfg.CORS.AllowedOrigins)
+	})
+
+	t.Run("already-normalised origins are left untouched", func(t *testing.T) {
+		cfg := validConfig()
+		cfg.CORS.AllowedOrigins = []string{"https://ats.example.com", "http://localhost:5173"}
+		require.NoError(t, cfg.Validate())
+		assert.Equal(t, []string{"https://ats.example.com", "http://localhost:5173"}, cfg.CORS.AllowedOrigins)
+	})
+}
+
 // TestLoad_AllDefaults sets only the one variable with no shippable
 // default (the database DSN has a working local default, so nothing is
 // strictly required, but every other variable is asserted unset here) and
@@ -353,6 +466,8 @@ func TestLoad_AllDefaults(t *testing.T) {
 	assert.False(t, cfg.Observability.TracingEnabled)
 	assert.Equal(t, "", cfg.Observability.OTLPEndpoint)
 	assert.Equal(t, "helios-ats", cfg.Observability.ServiceName)
+
+	assert.Empty(t, cfg.CORS.AllowedOrigins)
 
 	// The defaults themselves must satisfy Validate.
 	assert.NoError(t, cfg.Validate())
@@ -444,6 +559,37 @@ func TestLoad_AllowedModelsCommaList(t *testing.T) {
 	assert.Equal(t, []string{"tiny", "base", "large-v3"}, cfg.Transcriber.AllowedModels)
 }
 
+func TestLoad_CORSAllowedOrigins_UnsetDisablesIt(t *testing.T) {
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Empty(t, cfg.CORS.AllowedOrigins)
+}
+
+func TestLoad_CORSAllowedOrigins_CommaSeparated(t *testing.T) {
+	t.Setenv("HELIOS_CORS_ALLOWED_ORIGINS", "https://ats.example.com, http://localhost:5173 ,")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"https://ats.example.com", "http://localhost:5173"}, cfg.CORS.AllowedOrigins)
+}
+
+func TestLoad_CORSAllowedOrigins_NormalizesEndToEnd(t *testing.T) {
+	t.Setenv("HELIOS_CORS_ALLOWED_ORIGINS", "https://ATS.home.lan:443")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"https://ats.home.lan"}, cfg.CORS.AllowedOrigins)
+}
+
+func TestLoad_CORSAllowedOrigins_InvalidOriginFailsValidate(t *testing.T) {
+	t.Setenv("HELIOS_CORS_ALLOWED_ORIGINS", "not-a-valid-origin")
+
+	cfg, err := Load()
+	assert.Nil(t, cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CORS")
+}
+
 // TestLoad_FullCustomEnvironment sets every documented variable to a
 // non-default value and checks Load produces a Config that matches, end to
 // end.
@@ -489,6 +635,7 @@ func TestLoad_FullCustomEnvironment(t *testing.T) {
 		"HELIOS_OBSERVABILITY_TRACING_ENABLED": "true",
 		"HELIOS_OBSERVABILITY_OTLP_ENDPOINT":   "otel-collector:4317",
 		"HELIOS_OBSERVABILITY_SERVICE_NAME":    "helios-ats-staging",
+		"HELIOS_CORS_ALLOWED_ORIGINS":          "https://ats-cors.example.com,http://localhost:5173",
 	}
 	for k, v := range env {
 		t.Setenv(k, v)
@@ -560,6 +707,8 @@ func TestLoad_FullCustomEnvironment(t *testing.T) {
 		OTLPEndpoint:   "otel-collector:4317",
 		ServiceName:    "helios-ats-staging",
 	}, cfg.Observability)
+
+	assert.Equal(t, []string{"https://ats-cors.example.com", "http://localhost:5173"}, cfg.CORS.AllowedOrigins)
 
 	assert.NoError(t, cfg.Validate())
 }

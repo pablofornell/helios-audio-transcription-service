@@ -337,8 +337,9 @@ func Build(ctx context.Context, cfg *config.Config, opts ...Option) (stack *Stac
 		// config.go). A route timeout any shorter would cut off a large,
 		// merely slow, upload before the handler's own logic ever gets a
 		// chance to reject or accept it.
-		RouteTimeout:   cfg.HTTP.ReadTimeout,
-		MetricsEnabled: cfg.Observability.MetricsEnabled,
+		RouteTimeout:       cfg.HTTP.ReadTimeout,
+		MetricsEnabled:     cfg.Observability.MetricsEnabled,
+		CORSAllowedOrigins: cfg.CORS.AllowedOrigins,
 	})
 
 	return s, nil

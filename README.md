@@ -137,6 +137,7 @@ export the variables directly for `go run`/`make run`. The ones worth knowing up
 | `HELIOS_WORKER_CONCURRENCY` | `2` | How many transcriptions run at once per process. |
 | `HELIOS_AUDIO_MAX_DURATION` | `4h` | Audio longer than this is rejected (at probe time — see `docs/ARCHITECTURE.md`). |
 | `HELIOS_RETENTION_MAX_AGE` | `168h` (7 days) | How old a terminal (succeeded/failed/canceled) transcription must be before the retention sweep deletes it — database row and files both. See `docs/RUNBOOK.md`. |
+| `HELIOS_CORS_ALLOWED_ORIGINS` | *(unset, CORS disabled)* | Comma-separated exact origins (`scheme://host[:port]`, no wildcard) allowed to make cross-origin browser requests against this API. Only needed when the web build of `desktop/frontend` (a browser tab, not the Wails app) is pointed at a server on a different origin than the one it was served from — see its own Settings → Server, and `desktop/frontend/src/lib/browser/serverConfig.ts`. The ordinary same-origin deployment never needs this. |
 
 **Why `HELIOS_`, not `ATS_`.** These variables, the `helios_`-prefixed Prometheus
 metrics on `/metrics`, the `github.com/pablofornell/helios-audio-transcription-service`

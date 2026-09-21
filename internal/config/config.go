@@ -9,6 +9,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -163,6 +164,38 @@ type ObservabilityConfig struct {
 	ServiceName string
 }
 
+// CORSConfig controls whether internal/httpapi answers cross-origin
+// requests at all. Every deployment shipped before this existed assumed a
+// same-origin browser client (the desktop app's web build served, and
+// proxied to, from one origin — see deploy's Caddy/nginx config) or a
+// non-browser caller CORS never applies to in the first place; this exists
+// solely for the case that assumption no longer holds, e.g. that same web
+// build pointed at a *different* HELIOS_HTTP_ADDR via its own Settings →
+// Server (desktop/frontend/src/lib/browser's server setting).
+type CORSConfig struct {
+	// AllowedOrigins is the exact set of origins (scheme://host[:port], no
+	// path — e.g. "https://ats.example.com") a cross-origin browser
+	// request's Origin header is checked against. Empty (the default)
+	// disables CORS entirely: no Origin header is ever inspected and no
+	// Access-Control-* header is ever written, exactly as if this config
+	// did not exist — see httpapi's CORS middleware doc. There is no
+	// wildcard "*" support: an allowlist of exact origins is the only mode
+	// this accepts, matching the closed set of browser deployments Helios
+	// actually expects (unlike a public API, this is not meant to be
+	// embedded from arbitrary third-party origins).
+	//
+	// Every entry here is lowercased and stripped of a default port
+	// (":443" for https, ":80" for http) by Validate — see
+	// normalizeCORSOrigin's own doc for why: a real browser's Origin
+	// header is always in that exact form, and httpapi's CORS middleware
+	// matches against it with a plain, case-sensitive exact-match lookup.
+	// Read this field only after Validate has run (Load always runs it;
+	// anything else constructing a Config directly must call it too) —
+	// before that, an operator-typed "https://HOST:443" is still here
+	// verbatim, not yet the "https://host" it is equivalent to.
+	AllowedOrigins []string
+}
+
 // Config is the fully assembled, validated runtime configuration.
 type Config struct {
 	HTTP          HTTPConfig
@@ -173,6 +206,7 @@ type Config struct {
 	Worker        WorkerConfig
 	Retention     RetentionConfig
 	Observability ObservabilityConfig
+	CORS          CORSConfig
 }
 
 // Load reads Config from the environment (every variable prefixed
@@ -244,6 +278,9 @@ func Load() (*Config, error) {
 			OTLPEndpoint:   l.getString("OBSERVABILITY_OTLP_ENDPOINT", ""),
 			ServiceName:    l.getString("OBSERVABILITY_SERVICE_NAME", "helios-ats"),
 		},
+		CORS: CORSConfig{
+			AllowedOrigins: l.getStringSlice("CORS_ALLOWED_ORIGINS", nil),
+		},
 	}
 
 	if len(l.errs) > 0 {
@@ -305,7 +342,14 @@ func (c *Config) validateDurations() []durationField {
 // Audio.Timeout+Transcriber.Timeout that does not leave Worker.JobTimeout
 // strictly ahead of it, Worker.Concurrency or Worker.MaxAttempts below 1, a
 // Worker.HeartbeatInterval that is not strictly less than
-// Worker.LeaseDuration, and TracingEnabled without an OTLPEndpoint.
+// Worker.LeaseDuration, TracingEnabled without an OTLPEndpoint, and a
+// malformed CORS.AllowedOrigins entry (normalizeCORSOrigin's own doc).
+// That last check is the one exception to "Validate only ever reads c": a
+// well-formed origin is rewritten in place
+// (c.CORS.AllowedOrigins[i] = normalizeCORSOrigin(...)) rather than merely
+// accepted as-is, so every Config that has passed Validate — whether via
+// Load or constructed directly, e.g. in a test — carries the exact form
+// httpapi's CORS middleware needs to match a real browser's Origin header.
 func (c *Config) Validate() error {
 	if c.Database.DSN == "" {
 		return fmt.Errorf("config: database DSN is required")
@@ -366,7 +410,80 @@ func (c *Config) Validate() error {
 	if c.Observability.TracingEnabled && c.Observability.OTLPEndpoint == "" {
 		return fmt.Errorf("config: observability OTLP endpoint is required when tracing is enabled")
 	}
+	// Validated *and* normalised in place — see normalizeCORSOrigin's own
+	// doc for why storing the normalised form back onto c matters: it is
+	// what makes httpapi's CORS middleware's exact-match lookup actually
+	// match a real browser's Origin header, not just what makes this
+	// config well-formed.
+	for i, origin := range c.CORS.AllowedOrigins {
+		normalized, err := normalizeCORSOrigin(origin)
+		if err != nil {
+			return fmt.Errorf("config: CORS allowed origin %q is invalid: %w", origin, err)
+		}
+		c.CORS.AllowedOrigins[i] = normalized
+	}
 	return nil
+}
+
+// normalizeCORSOrigin rejects anything that is not a bare
+// "scheme://host[:port]" origin — a wildcard "*" (CORSConfig.AllowedOrigins'
+// own doc says why this package never supports one), a scheme other than
+// http/https, a missing host, or anything carrying a path/query/fragment
+// beyond the origin itself (an origin, unlike a URL, has none of those —
+// accepting one here would silently be compared against an Origin header
+// that can never contain it either, so it could never match anything) —
+// and otherwise returns it lowercased (scheme and host both; a browser's
+// own Origin header is always lowercase there) with a default port
+// stripped (":443" for https, ":80" for http; a browser's own Origin
+// header never carries one). Both normalisations exist for exactly one
+// reason: httpapi's CORS middleware compares a configured origin against
+// an incoming Origin header with a bare `map[string]bool` exact-match
+// lookup, not a case-insensitive or scheme-aware one — an operator typing
+// "https://HOST:443" (both perfectly valid, equivalent ways to spell the
+// same origin) must not silently never match the "https://host" a real
+// browser actually sends.
+func normalizeCORSOrigin(origin string) (string, error) {
+	if origin == "*" {
+		return "", fmt.Errorf(`wildcard "*" is not supported — list exact origins instead`)
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return "", fmt.Errorf("not a valid URL: %w", err)
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", fmt.Errorf("must use http or https, got %q", u.Scheme)
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("missing host")
+	}
+	if u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("must be a bare origin (scheme://host[:port]), not a path, query or fragment")
+	}
+
+	host := strings.ToLower(u.Hostname())
+	port := u.Port()
+	if port != "" {
+		// Browsers serialise the port as a plain decimal, so "0443" must
+		// become "443" before the default-port check below can see it.
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return "", fmt.Errorf("invalid port %q", port)
+		}
+		port = strconv.Itoa(n)
+	}
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	// u.Hostname() drops an IPv6 literal's brackets; a browser's Origin
+	// header keeps them, so put them back or the entry can never match.
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	if port == "" {
+		return scheme + "://" + host, nil
+	}
+	return scheme + "://" + host + ":" + port, nil
 }
 
 // contains reports whether s holds v. A tiny local helper rather than

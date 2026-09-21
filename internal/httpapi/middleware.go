@@ -98,6 +98,117 @@ func recoverer(next http.Handler) http.Handler {
 	})
 }
 
+// corsAllowedMethods and corsAllowedHeaders are this API's fixed preflight
+// answer, covering exactly what desktop/frontend/src/lib/browser actually
+// sends: GET (list/get/health), POST (submit/retry/cancel), DELETE
+// (deleteTranscription) and OPTIONS itself; Content-Type (set whenever a
+// request carries a JSON body, and left unset for the multipart upload —
+// the browser sets its own boundary-carrying Content-Type there, which is
+// still just "Content-Type") and Accept (sent on every request, and
+// already CORS-safelisted, but listed anyway so an allowed preflight never
+// has to omit a header the browser's actual request will go on to send).
+// Range is listed defensively: the <audio> element getAudio streams to
+// (features/library/DetailPanel.tsx) has no `crossorigin` attribute, so a
+// browser only ever applies CORS to a "cors"-mode request, and a plain
+// `<audio src>` is "no-cors" -- its own Range-bearing seek requests never
+// go through this middleware's preflight check at all. Listed here purely
+// defensively, so a future fetch-based Range request (e.g. a feature that
+// needs to inspect the response itself, which would run in "cors" mode)
+// does not have to touch this list to start working.
+//
+// There is deliberately no Access-Control-Expose-Headers here: that only
+// matters for a response header client-side JavaScript reads directly (via
+// `Response.headers.get`), and desktop/frontend/src/lib/browser does not
+// read any — getAudio's Content-Disposition/Content-Range/Accept-Ranges
+// are consumed by the browser's own <audio> element, never by this
+// module's fetch() calls, and getTranscript's body is read as plain text,
+// not its headers. Add one here, naming the specific header, the day a
+// browser feature actually needs it.
+const (
+	corsAllowedMethods = "GET, POST, DELETE, OPTIONS"
+	corsAllowedHeaders = "Content-Type, Accept, Range"
+	// corsMaxAgeSeconds bounds how long a browser may cache one preflight
+	// answer before re-asking — 10 minutes, generous enough that a normal
+	// session issues at most a handful of preflights, short enough that a
+	// HELIOS_CORS_ALLOWED_ORIGINS change deployed today is not still being
+	// worked around by a cached "allowed" (or "disallowed") answer hours
+	// later.
+	corsMaxAgeSeconds = "600"
+)
+
+// newCORSMiddleware returns CORS-handling middleware for allowedOrigins —
+// config.CORSConfig.AllowedOrigins, an exact-match allowlist (see that
+// field's own doc for why there is no wildcard). Returns next completely
+// unwrapped when allowedOrigins is empty (the default): no Origin header
+// is ever inspected and no Access-Control-* or Vary header is ever
+// written, so every deployment that has not opted in keeps exactly the
+// same behaviour it had before this middleware existed.
+//
+// Once enabled: a request that carries no Origin header at all — same-
+// origin fetches, curl, server-to-server calls, and every request this API
+// answered before CORS existed — passes straight through untouched, since
+// CORS is a browser-enforced, cross-origin-only mechanism with nothing to
+// decide for one that was never cross-origin in the first place. A request
+// whose Origin is not in allowedOrigins also passes straight through
+// unmodified rather than being rejected here (no Access-Control-Allow-
+// Origin, so the requesting browser — not this handler — is what actually
+// blocks it from reaching the calling page's script; a non-browser caller,
+// which CORS was never enforced against to begin with, is never broken by
+// a policy it was never subject to).
+//
+// A preflight — method OPTIONS carrying Access-Control-Request-Method — is
+// answered here directly, for an allowed origin, without ever reaching the
+// router: NewRouter's middleware stack wraps route dispatch itself (see
+// its own doc), so returning here without calling next is enough; no
+// route needs to be registered for OPTIONS on any path. A preflight for a
+// disallowed origin instead falls through to next exactly like any other
+// disallowed-origin request above — chi will answer it however it answers
+// any other unregistered-method request, which does not matter: the
+// browser already refuses the caller access based on the missing
+// Access-Control-Allow-Origin, regardless of what status code comes back.
+func newCORSMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
+	if len(allowedOrigins) == 0 {
+		return func(next http.Handler) http.Handler { return next }
+	}
+	allowed := make(map[string]bool, len(allowedOrigins))
+	for _, origin := range allowedOrigins {
+		allowed[origin] = true
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Every response whose CORS headers depend on Origin must say
+			// so, or a cache sitting in front of this API (a CDN, or the
+			// browser's own HTTP cache) could serve one origin's allowed
+			// response to a different, disallowed one.
+			w.Header().Add("Vary", "Origin")
+
+			if !allowed[origin] {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+
+			if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
+				w.Header().Set("Access-Control-Allow-Methods", corsAllowedMethods)
+				w.Header().Set("Access-Control-Allow-Headers", corsAllowedHeaders)
+				w.Header().Set("Access-Control-Max-Age", corsMaxAgeSeconds)
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // metricsMiddleware records one observability.Metrics.ObserveHTTP call per
 // request, labelled with chi's matched route PATTERN
 // (chi.RouteContext(r.Context()).RoutePattern()) rather than r.URL.Path --
