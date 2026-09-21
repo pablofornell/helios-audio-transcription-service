@@ -15,12 +15,15 @@ export interface ColdStartProps {
  * fault it is, and hands over the exact command — the serif's second and
  * last appearance in the happy path.
  *
- * `apiURL` is empty in two ordinary cases, not just a slow load: "local"
- * mode, which has no separate server URL to name at all, and a plain
- * browser tab (see `GetServerSettings`'s own doc — both report back the
- * same way). Rendering "Tried  — nothing answered" with a blank in the
- * middle would look broken in either case, so the "Tried ..." clause is
- * simply omitted whenever there is nothing real to put there instead.
+ * `apiURL` is empty in one ordinary case, not just a slow load: "local"
+ * mode, which has no separate server URL to name at all (see
+ * `GetServerSettings`'s own doc). A plain browser tab always has one —
+ * same-origin by default, or whatever Settings → Server last saved (see
+ * `lib/browser/serverConfig.ts`) — so this only ever happens there while
+ * `App`'s own `getServerSettings()` call is still in flight. Rendering
+ * "Tried  — nothing answered" with a blank in the middle would look broken
+ * in either case, so the "Tried ..." clause is simply omitted whenever
+ * there is nothing real to put there instead.
  */
 export function ColdStart({ connection, apiURL }: ColdStartProps) {
   const [showHelp, setShowHelp] = useState(false);

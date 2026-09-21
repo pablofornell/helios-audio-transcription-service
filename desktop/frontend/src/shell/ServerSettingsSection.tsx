@@ -47,11 +47,14 @@ function isStaleTestResult(currentDraft: DraftFields, testedHost: string, tested
  * `HELIOS_MODE`), applied live on save with no restart (see
  * `desktop/serversettings.go`'s `SetServerSettings`).
  *
- * `getServerSettings().editable` is false in "local" mode, which has no
- * separate server to point anywhere, and in a plain browser tab, which has
- * no such binding at all (`lib/browser/api.ts`'s own doc) — both report
- * back the same way, so this section shows one combined explanation and
- * disables its fields rather than trying (and failing) to tell them apart.
+ * `getServerSettings().editable` is false only in "local" mode
+ * (`desktop/mode.go`'s `HELIOS_MODE`), which has no separate server to
+ * point anywhere — this section shows one explanation and disables its
+ * fields in that case. A plain browser tab is always editable
+ * (`lib/browser/api.ts`'s own doc): it defaults to same-origin, but
+ * Settings → Server can point it at a different `helios-transcription-api`
+ * entirely, persisted per browser in `localStorage` (see
+ * `lib/browser/serverConfig.ts`).
  *
  * There is no separate scheme control: typing a whole URL into Host (e.g.
  * `"https://example.com"`) is how the effective scheme actually changes —
@@ -204,9 +207,7 @@ export function ServerSettingsSection({ onSaved }: ServerSettingsSectionProps) {
       <h3 className={settingsStyles.sectionTitle}>Server</h3>
       {settings?.warning ? <p className={styles.warning}>{settings.warning}</p> : null}
       {!editable ? (
-        <p className={styles.hint}>
-          Not editable here — this build isn't pointed at a separate server (local mode, or a browser tab).
-        </p>
+        <p className={styles.hint}>Not editable here — this build runs its backend in-process (local mode).</p>
       ) : null}
       <div className={styles.row}>
         <div className={styles.hostField}>

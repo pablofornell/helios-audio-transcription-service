@@ -222,10 +222,12 @@ export interface HealthReport {
  * `baseUrl` is the exact base URL actually being dialled — not a
  * `http://host:port` reconstruction on this side, so it can never disagree
  * with reality (an https target, or one behind a path prefix, is shown
- * exactly as it is). `editable` is false in a plain browser tab
- * (`./browser/api.ts` has no equivalent binding at all) — the Settings
- * dialog's Server section disables its fields and explains why whenever
- * this is false, rather than letting a save attempt fail. `warning`, when
+ * exactly as it is). `editable` is false only in "local" mode
+ * (`desktop/mode.go`'s `HELIOS_MODE`) — a plain browser tab
+ * (`./browser/serverConfig.ts`) is always editable, defaulting to
+ * same-origin. The Settings dialog's Server section disables its fields
+ * and explains why whenever this is false, rather than letting a save
+ * attempt fail. `warning`, when
  * non-empty, explains why a saved value on disk could not be used at
  * startup (see `GetServerSettings`'s own doc) — shown once and gone only
  * once a save actually succeeds.
