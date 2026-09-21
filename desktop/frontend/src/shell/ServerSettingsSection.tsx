@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, TextField, useToast } from "../components";
-import { connectionMonitor, getServerSettings, HeliosError, setServerSettings, testServerConnection, type ServerSettings } from "../lib";
+import {
+  connectionMonitor,
+  getServerSettings,
+  HeliosError,
+  setServerSettings,
+  testServerConnection,
+  transcriptionStore,
+  type ServerSettings,
+} from "../lib";
 import settingsStyles from "./SettingsDialog.module.css";
 import styles from "./ServerSettingsSection.module.css";
 
@@ -168,6 +176,10 @@ export function ServerSettingsSection({ onSaved }: ServerSettingsSectionProps) {
       // (up to lib/connection.ts's STEADY_POLL_MS away) — the point of an
       // immediate apply is not making the user wonder whether it worked.
       connectionMonitor.retryNow();
+      // Same reasoning for the Library/Transcribe queue: without this,
+      // rows from the old server would sit in lib/store.ts's cache until
+      // its next poll tick happened to land against the new one.
+      transcriptionStore.resetForServerChange();
       onSaved?.(updated);
     } catch (err) {
       const helios = err instanceof HeliosError ? err : new HeliosError("unknown", String(err));

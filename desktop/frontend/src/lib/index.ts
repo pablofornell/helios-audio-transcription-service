@@ -6,5 +6,6 @@ export * from "./errors";
 export * from "./api";
 export * from "./format";
 export * from "./connection";
+export * from "./serverSettingsSignal";
 export * from "./store";
 export * from "./theme";

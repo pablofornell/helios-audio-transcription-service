@@ -141,4 +141,58 @@ describe("transcriptionStore — poll cadence", () => {
 
     unsubscribe();
   });
+
+  it("resetForServerChange() polls immediately, against whatever server list() now targets", async () => {
+    let calls = 0;
+    listImpl = () => {
+      calls += 1;
+      return Promise.resolve({ items: [makeTranscription({ status: "succeeded" })] });
+    };
+
+    const { transcriptionStore } = await import("./store");
+    const unsubscribe = transcriptionStore.subscribe(() => {});
+    await vi.waitFor(() => expect(calls).toBe(1));
+
+    transcriptionStore.resetForServerChange();
+    await vi.waitFor(() => expect(calls).toBe(2));
+
+    unsubscribe();
+  });
+
+  it("resetForServerChange() discards an old-server list() that was still in flight when it fired, instead of letting it overwrite the new server's rows", async () => {
+    // Simulates Settings -> Server saving mid-poll: the first list() call
+    // (against the old server) is left deliberately unresolved until
+    // after resetForServerChange() has already kicked off, and resolved,
+    // a second one (against the "new" server) — see this test's own
+    // assertions for which one's row must end up in the cache.
+    let resolveOldServer: (page: ListPage) => void = () => {};
+    let call = 0;
+    listImpl = () => {
+      call += 1;
+      if (call === 1) {
+        return new Promise<ListPage>((resolve) => {
+          resolveOldServer = resolve;
+        });
+      }
+      return Promise.resolve({ items: [makeTranscription({ id: "new-server-row", status: "succeeded" })] });
+    };
+
+    const { transcriptionStore } = await import("./store");
+    const unsubscribe = transcriptionStore.subscribe(() => {});
+    await vi.waitFor(() => expect(call).toBe(1)); // the old server's list() is now in flight, unresolved
+
+    transcriptionStore.resetForServerChange();
+    await vi.waitFor(() => expect(call).toBe(2));
+    await vi.waitFor(() => expect(transcriptionStore.getSnapshot().transcriptions).toHaveLength(1));
+    expect(transcriptionStore.getSnapshot().transcriptions[0].id).toBe("new-server-row");
+
+    // The old server's call finally resolves — its stale result must not
+    // clobber the new server's row that already landed above.
+    resolveOldServer({ items: [makeTranscription({ id: "old-server-row", status: "succeeded" })] });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(transcriptionStore.getSnapshot().transcriptions.map((t) => t.id)).toEqual(["new-server-row"]);
+
+    unsubscribe();
+  });
 });

@@ -51,7 +51,17 @@ class TranscriptionStore {
   private listeners = new Set<Listener>();
   private started = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
-  private inFlight = false;
+  // Bumped by resetForServerChange(); a refresh() call's own gen is
+  // captured up front (see refresh's doc) and checked again once its
+  // list() resolves, so a request that was already in flight against the
+  // old server when the bump happened cannot apply its (stale) result on
+  // top of a newer refresh's — see resetForServerChange's own doc.
+  private generation = 0;
+  // The generation a refresh() call is currently in flight for, or
+  // undefined between calls — a plain boolean would let
+  // resetForServerChange's forced refresh() get skipped by this same
+  // dedupe guard while the old server's request is still outstanding.
+  private inFlightGen: number | undefined;
 
   getSnapshot = (): TranscriptionStoreSnapshot => this.snapshot;
 
@@ -71,26 +81,57 @@ class TranscriptionStore {
     };
   };
 
-  /** Re-fetches the first page from the server and replaces the cache wholesale. Safe to call any time, including manually (e.g. right after a submit/cancel/retry so the UI doesn't wait out a full poll interval). */
+  /**
+   * Re-fetches the first page from the server and replaces the cache
+   * wholesale. Safe to call any time, including manually (e.g. right after
+   * a submit/cancel/retry so the UI doesn't wait out a full poll
+   * interval). `gen` is snapshotted up front: if `resetForServerChange()`
+   * bumps `generation` again before `list()` (built from whatever
+   * `apiBase()` was effective when this call started — see `./api.ts`)
+   * resolves, this call's result describes a server that is no longer the
+   * effective one, so it is discarded rather than published or used to
+   * reschedule the next poll.
+   */
   refresh = async (): Promise<void> => {
-    if (this.inFlight) return;
-    this.inFlight = true;
+    if (this.inFlightGen !== undefined) return;
+    const gen = this.generation;
+    this.inFlightGen = gen;
     try {
       const page = await list({ limit: INITIAL_PAGE_SIZE });
+      if (gen !== this.generation) return;
       this.byId = new Map(page.items.map((t) => [t.id, t]));
       this.publish({ loading: false, error: undefined, lastSyncAt: Date.now() });
     } catch (err) {
+      if (gen !== this.generation) return;
       const heliosErr = err instanceof HeliosError ? err : new HeliosError("unknown", String(err));
       this.publish({ loading: false, error: heliosErr });
     } finally {
-      this.inFlight = false;
-      this.scheduleNext();
+      if (this.inFlightGen === gen) this.inFlightGen = undefined;
+      if (gen === this.generation) this.scheduleNext();
     }
   };
 
   /** Cancels any pending poll timer and refreshes immediately — for an action (submit, cancel, retry, delete) that just changed server state and wants the UI to reflect it without waiting out the current interval. */
   refreshNow = (): void => {
     if (this.timer) clearTimeout(this.timer);
+    void this.refresh();
+  };
+
+  /**
+   * `refreshNow()`'s counterpart for Settings -> Server: bumps
+   * `generation` and clears `inFlightGen` before calling `refresh()`, so a
+   * fresh request against the new `apiBase()` starts immediately even
+   * while the previous one (still built against the old server) is
+   * outstanding — that older call's dedupe slot is abandoned, and once it
+   * eventually resolves, `refresh()`'s own `gen` check discards its result
+   * instead of letting rows from the old server land in the cache after
+   * the new server's own, correct ones already did. Call this right after
+   * `setServerSettings` resolves.
+   */
+  resetForServerChange = (): void => {
+    if (this.timer) clearTimeout(this.timer);
+    this.generation++;
+    this.inFlightGen = undefined;
     void this.refresh();
   };
 

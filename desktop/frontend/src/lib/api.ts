@@ -1,5 +1,6 @@
 import * as browserApi from "./browser/api";
 import { hasWailsRuntime } from "./runtime";
+import { bumpServerSettingsVersion } from "./serverSettingsSignal";
 import type {
   AudioSource,
   HealthReport,
@@ -129,9 +130,15 @@ export function getServerSettings(): Promise<ServerSettings> {
  * `HeliosError` whose `code` is `"invalid_input"` for a malformed host or
  * out-of-range port; call this only when `getServerSettings().editable` is
  * true, since neither adapter can honour it otherwise.
+ *
+ * Also bumps `./serverSettingsSignal.ts`'s version, once, right after a
+ * successful save — the one hook the rest of the app has to notice this
+ * happened without re-polling `getServerSettings()` on a timer.
  */
-export function setServerSettings(host: string, port: number): Promise<ServerSettings> {
-  return impl().setServerSettings(host, port);
+export async function setServerSettings(host: string, port: number): Promise<ServerSettings> {
+  const settings = await impl().setServerSettings(host, port);
+  bumpServerSettingsVersion();
+  return settings;
 }
 
 /**

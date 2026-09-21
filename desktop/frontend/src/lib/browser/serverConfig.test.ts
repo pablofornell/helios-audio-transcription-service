@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HeliosError } from "../errors";
 import { apiBase, currentSettings, setServer, validateCandidate } from "./serverConfig";
 
@@ -175,6 +175,42 @@ describe("setServer", () => {
 
   it("does not reject a plain http target from an http page", () => {
     expect(() => setServer("example.com", 9090)).not.toThrow();
+  });
+
+  it("matches the scheme prefix case-sensitively, exactly like desktop/serversettings.go's strings.HasPrefix", () => {
+    // "HTTPS://" is not recognised as a typed prefix at all (unlike the
+    // old case-insensitive regex) -- it falls through to the same "://"
+    // rejection cleanServerHost gives it, not a silently-accepted https
+    // override.
+    expect(() => setServer("HTTPS://example.com", 9090)).toThrow(/scheme/);
+  });
+});
+
+describe("localStorage throwing (private browsing, strict CSP, full quota — see readStored/writeStored's own doc)", () => {
+  it("apiBase() falls back to the default when localStorage.getItem throws", () => {
+    const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("access denied");
+    });
+    try {
+      expect(apiBase()).toBe("");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("setServer does not throw when localStorage.setItem throws — the save is a best-effort one", () => {
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("quota exceeded");
+    });
+    try {
+      expect(() => setServer("example.com", 9090)).not.toThrow();
+      // Nothing actually got persisted, so the effective server is still
+      // the default -- exactly like setItem never having been called at
+      // all (see writeStored's doc: a failed write is silently swallowed).
+      expect(apiBase()).toBe("");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

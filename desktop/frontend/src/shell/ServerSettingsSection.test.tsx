@@ -5,10 +5,13 @@ import { ServerSettingsSection } from "./ServerSettingsSection";
 
 // ServerSettingsSection's only backend calls go through this module
 // boundary — see SaveCopyDialog.test.tsx's own mock for the pattern this
-// follows. connectionMonitor is mocked outright (not spread from actual):
-// nothing here exercises useConnection/getSnapshot, and retryNow's real
-// implementation would kick off an actual health() poll this test has no
-// reason to let run.
+// follows. connectionMonitor and transcriptionStore are both mocked
+// outright (not spread from actual): nothing here exercises
+// useConnection/getSnapshot or useTranscriptions, and the real
+// retryNow/resetForServerChange implementations would each kick off an
+// actual fetch/poll timer this test has no reason to let run (or, for
+// transcriptionStore, no server to answer it at all — see lib/store.ts's
+// own doc).
 vi.mock("../lib", async () => {
   const actual = await vi.importActual<typeof import("../lib")>("../lib");
   return {
@@ -17,10 +20,11 @@ vi.mock("../lib", async () => {
     setServerSettings: vi.fn(),
     testServerConnection: vi.fn(),
     connectionMonitor: { retryNow: vi.fn() },
+    transcriptionStore: { resetForServerChange: vi.fn() },
   };
 });
 
-import { connectionMonitor, getServerSettings, setServerSettings, testServerConnection } from "../lib";
+import { connectionMonitor, getServerSettings, setServerSettings, testServerConnection, transcriptionStore } from "../lib";
 
 function editableSettings(overrides: Partial<ServerSettings> = {}): ServerSettings {
   return { host: "localhost", port: 8080, baseUrl: "http://localhost:8080", editable: true, ...overrides };
@@ -204,6 +208,9 @@ describe("ServerSettingsSection — validation and Save", () => {
 
     await waitFor(() => expect(setServerSettings).toHaveBeenCalledWith("new-host", 9999));
     expect(connectionMonitor.retryNow).toHaveBeenCalledTimes(1);
+    // The Library/Transcribe queue's cache is told to drop rows from the
+    // old server and re-fetch against the new one right away too.
+    expect(transcriptionStore.resetForServerChange).toHaveBeenCalledTimes(1);
     expect(onSaved).toHaveBeenCalledWith(updated);
     // Freshly saved values are no longer "dirty", so Save goes back to disabled.
     await waitFor(() => expect(saveButton).toBeDisabled());
@@ -225,6 +232,7 @@ describe("ServerSettingsSection — validation and Save", () => {
 
     expect(await screen.findByText("server port must be between 1 and 65535, got 0")).toBeInTheDocument();
     expect(connectionMonitor.retryNow).not.toHaveBeenCalled();
+    expect(transcriptionStore.resetForServerChange).not.toHaveBeenCalled();
     expect(host).toBeEnabled();
   });
 });

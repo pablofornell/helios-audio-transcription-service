@@ -12,6 +12,7 @@ import {
   openAudio,
   revealInFileManager,
   transcript as fetchTranscript,
+  useServerSettingsVersion,
   type MediaLocation as MediaLocationInfo,
   type Transcription,
   type TranscriptFormat,
@@ -51,6 +52,13 @@ export function DetailPanel({ transcription, onClose, onRetry, onSaveAs, onDelet
   const [opening, setOpening] = useState(false);
   const [revealing, setRevealing] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
+  // Bumped by `setServerSettings` (`../../lib/serverSettingsSignal.ts`) the
+  // moment Settings -> Server saves a new one — included below so the
+  // audio effect re-reads `getServerSettings()` right then, not only when
+  // `transcription.id` next changes (which is all it used to be keyed on,
+  // leaving the player pointed at whatever server was effective when this
+  // panel was first opened for this transcription).
+  const settingsVersion = useServerSettingsVersion();
 
   useEffect(() => {
     let cancelled = false;
@@ -65,6 +73,13 @@ export function DetailPanel({ transcription, onClose, onRetry, onSaveAs, onDelet
       .catch(() => {
         if (!cancelled) setMediaLoc({ exists: false });
       });
+    return () => {
+      cancelled = true;
+    };
+  }, [transcription.id]);
+
+  useEffect(() => {
+    let cancelled = false;
     getServerSettings()
       .then((settings) => {
         if (!cancelled) setServerBase(settings.baseUrl.replace(/\/$/, ""));
@@ -75,7 +90,7 @@ export function DetailPanel({ transcription, onClose, onRetry, onSaveAs, onDelet
     return () => {
       cancelled = true;
     };
-  }, [transcription.id]);
+  }, [settingsVersion]);
 
   useEffect(() => {
     if (transcription.status !== "succeeded") return;

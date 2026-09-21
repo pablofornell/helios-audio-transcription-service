@@ -160,21 +160,24 @@ function mixedContentError(host: string, port: number): HeliosError {
  * Validates and normalises a user-typed Host exactly like
  * `desktop/serversettings.go`'s `cleanServerHost`: trims whitespace,
  * recognises (and strips) a leading `"http://"`/`"https://"` as
- * `typedScheme` rather than discarding it, and rejects — as a
- * `HeliosError` with code `"invalid_input"`, the same code
- * `desktop/serversettings.go` reports for the same mistakes — anything
- * left over that is not a bare hostname: empty, whitespace, a stray
- * `"://"`, a path/query/fragment separator, a `:port` (use the Port field
- * instead), `"@"`/`"%"`/`"\\"`, or anything else that fails to form a
- * valid URL host component at all.
+ * `typedScheme` rather than discarding it — the match is case-sensitive,
+ * exactly like `cleanServerHost`'s own `strings.HasPrefix`, so e.g.
+ * `"HTTPS://example.com"` is not recognised as a scheme prefix at all and
+ * falls through to the `"://"` rejection below, the same outcome the Go
+ * side gives it — and rejects — as a `HeliosError` with code
+ * `"invalid_input"`, the same code `desktop/serversettings.go` reports for
+ * the same mistakes — anything left over that is not a bare hostname:
+ * empty, whitespace, a stray `"://"`, a path/query/fragment separator, a
+ * `:port` (use the Port field instead), `"@"`/`"%"`/`"\\"`, or anything
+ * else that fails to form a valid URL host component at all.
  */
 function cleanHost(host: string): { cleanHost: string; typedScheme?: Scheme } {
   let h = host.trim();
   let typedScheme: Scheme | undefined;
-  if (/^https:\/\//i.test(h)) {
+  if (h.startsWith("https://")) {
     typedScheme = "https";
     h = h.slice(8);
-  } else if (/^http:\/\//i.test(h)) {
+  } else if (h.startsWith("http://")) {
     typedScheme = "http";
     h = h.slice(7);
   }

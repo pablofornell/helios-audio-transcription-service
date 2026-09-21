@@ -1,5 +1,14 @@
+import { act, render, waitFor } from "@testing-library/react";
+import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DetailPanel } from "../../features/library/DetailPanel";
 import { HeliosError } from "../errors";
+// `../../lib`'s own `setServerSettings` (as opposed to this module's own,
+// used everywhere else below): it is the one that also bumps
+// `../serverSettingsSignal.ts` after a save, so a mounted DetailPanel
+// actually notices — see the "DetailPanel's <audio> src" describe block
+// below, which is the only place this distinction matters.
+import { setServerSettings as saveServerSettingsAndNotify } from "../../lib";
 import type { Transcription } from "../types";
 import * as api from "./api";
 
@@ -235,12 +244,6 @@ describe("server settings — a saved server changes every request's URL", () =>
     expect(fetchMock.mock.calls[0][0]).toBe("http://example.com:9090/api/v1/transcriptions");
   });
 
-  it("the audio download URL a caller builds from getServerSettings().baseUrl also becomes absolute against the saved server", async () => {
-    const settings = await api.setServerSettings("example.com", 9090);
-    const audioSrc = `${settings.baseUrl}/api/v1/transcriptions/id-1/audio`;
-    expect(audioSrc).toBe("http://example.com:9090/api/v1/transcriptions/id-1/audio");
-  });
-
   it("health() (GET /readyz) also becomes absolute against the saved server", async () => {
     await api.setServerSettings("example.com", 9090);
     fetchMock.mockResolvedValue(jsonResponse(200, { ok: true, checks: {} }));
@@ -262,6 +265,61 @@ describe("server settings — a saved server changes every request's URL", () =>
 
   it("rejects an out-of-range port with a HeliosError", async () => {
     await expect(api.setServerSettings("example.com", 0)).rejects.toBeInstanceOf(HeliosError);
+  });
+});
+
+// DetailPanel's <audio src> is this adapter's one real caller of
+// getServerSettings().baseUrl (see features/library/DetailPanel.tsx) — a
+// bare string-concatenation assertion (what used to live here) proves
+// nothing about DetailPanel itself, only that template-literal
+// interpolation works, so these render it for real instead. No fake
+// Wails runtime is stubbed anywhere in this suite, so `hasWailsRuntime()`
+// is false and `../api.ts`'s `impl()` picks this module, exactly like a
+// plain browser tab.
+describe("DetailPanel's <audio> src follows the effective server", () => {
+  function renderDetailPanel(transcription: Transcription) {
+    return render(
+      createElement(DetailPanel, {
+        transcription,
+        onClose: () => {},
+        onRetry: () => {},
+        onSaveAs: () => {},
+        onDelete: () => {},
+        overlay: false,
+      }),
+    );
+  }
+
+  it("is an absolute URL against a saved cross-origin server", async () => {
+    await api.setServerSettings("example.com", 9090);
+    const transcription = makeWireTranscription({ id: "detail-audio-1" });
+
+    const { container } = renderDetailPanel(transcription);
+
+    await waitFor(() =>
+      expect(container.querySelector("audio")?.getAttribute("src")).toBe(
+        "http://example.com:9090/api/v1/transcriptions/detail-audio-1/audio",
+      ),
+    );
+  });
+
+  it("updates once Settings -> Server saves a different server, without DetailPanel remounting", async () => {
+    const transcription = makeWireTranscription({ id: "detail-audio-2" });
+    const { container } = renderDetailPanel(transcription);
+    const audioSrc = () => container.querySelector("audio")?.getAttribute("src");
+
+    await waitFor(() =>
+      expect(audioSrc()).toBe(`http://${window.location.hostname}:${window.location.port}/api/v1/transcriptions/detail-audio-2/audio`),
+    );
+
+    // Same call ServerSettingsSection's handleSave makes — see this
+    // file's own doc on why this, not `api.setServerSettings`, is the one
+    // that actually notifies a mounted DetailPanel.
+    await act(async () => {
+      await saveServerSettingsAndNotify("example.com", 9090);
+    });
+
+    await waitFor(() => expect(audioSrc()).toBe("http://example.com:9090/api/v1/transcriptions/detail-audio-2/audio"));
   });
 });
 
