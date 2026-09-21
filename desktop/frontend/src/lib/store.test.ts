@@ -195,4 +195,45 @@ describe("transcriptionStore — poll cadence", () => {
 
     unsubscribe();
   });
+
+  it("does not push the next poll back out when a stale generation's list() resolves late", async () => {
+    // Covers the `if (gen === this.generation) this.scheduleNext()` guard
+    // in refresh()'s `finally` specifically: without it, the old server's
+    // list() resolving after resetForServerChange() would call
+    // scheduleNext() a second time and reset the timer the new server's
+    // own refresh() already scheduled, delaying the next poll instead of
+    // leaving it alone.
+    let resolveOldServer: (page: ListPage) => void = () => {};
+    let call = 0;
+    listImpl = () => {
+      call += 1;
+      if (call === 1) {
+        return new Promise<ListPage>((resolve) => {
+          resolveOldServer = resolve;
+        });
+      }
+      return Promise.resolve({ items: [makeTranscription({ status: "succeeded" })] });
+    };
+
+    const { transcriptionStore } = await import("./store");
+    const unsubscribe = transcriptionStore.subscribe(() => {});
+    await vi.waitFor(() => expect(call).toBe(1)); // the old server's list() is now in flight, unresolved
+
+    transcriptionStore.resetForServerChange();
+    await vi.waitFor(() => expect(call).toBe(2)); // the new server's refresh() resolved and scheduled its own next poll
+
+    // Let all but the last 100ms of the idle interval (10s) pass, then let
+    // the stale call resolve.
+    await vi.advanceTimersByTimeAsync(9_900);
+    resolveOldServer({ items: [makeTranscription({ id: "old-server-row", status: "succeeded" })] });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Only the 100ms left on the original schedule should be needed -- if
+    // the stale call's finally had reset the timer, this would not fire yet.
+    await vi.advanceTimersByTimeAsync(100);
+    expect(call).toBe(3);
+
+    unsubscribe();
+  });
 });

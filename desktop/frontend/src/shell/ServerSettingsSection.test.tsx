@@ -208,8 +208,11 @@ describe("ServerSettingsSection — validation and Save", () => {
 
     await waitFor(() => expect(setServerSettings).toHaveBeenCalledWith("new-host", 9999));
     expect(connectionMonitor.retryNow).toHaveBeenCalledTimes(1);
-    // The Library/Transcribe queue's cache is told to drop rows from the
-    // old server and re-fetch against the new one right away too.
+    // The Transcribe queue's cache (transcriptionStore) is told to drop
+    // rows from the old server and re-fetch against the new one right away
+    // too. The Library screen's own query is a separate mechanism (it
+    // calls list() directly rather than mounting this store) and reacts to
+    // the settings-version signal instead -- see useLibraryQuery.ts.
     expect(transcriptionStore.resetForServerChange).toHaveBeenCalledTimes(1);
     expect(onSaved).toHaveBeenCalledWith(updated);
     // Freshly saved values are no longer "dirty", so Save goes back to disabled.

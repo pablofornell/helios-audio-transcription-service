@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useToast } from "../../components";
-import { deleteTranscription, get, HeliosError, retry, type Transcription, type TranscriptFormat } from "../../lib";
+import {
+  deleteTranscription,
+  get,
+  HeliosError,
+  retry,
+  useServerSettingsVersion,
+  type Transcription,
+  type TranscriptFormat,
+} from "../../lib";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import { DetailPanel } from "./DetailPanel";
 import { SaveAsDialog } from "./SaveAsDialog";
@@ -31,6 +39,24 @@ export function LibraryScreen({ openId }: LibraryScreenProps) {
   const [saveAsTarget, setSaveAsTarget] = useState<{ transcription: Transcription; format: TranscriptFormat } | undefined>(undefined);
   const [overlay, setOverlay] = useState(() => window.innerWidth < OVERLAY_BREAKPOINT);
   const consumedOpenIdRef = useRef<string | undefined>(undefined);
+
+  // Settings -> Server saving a new server: the open detail panel (if any)
+  // still shows the old server's transcript, while `DetailPanel`'s own
+  // audio element switches to the new server right under it (its own
+  // `settingsVersion` effect, `DetailPanel.tsx`) -- the old id simply does
+  // not exist there, a 404 waiting to happen. Closing it here is the
+  // simplest correct behavior: the id belongs to the old server, and
+  // nothing worth keeping survives the switch. The ref comparison (not a
+  // plain effect on `settingsVersion`) is what keeps this from clobbering
+  // an `openId` hand-off that lands in the very same first render.
+  const settingsVersion = useServerSettingsVersion();
+  const lastSettingsVersionRef = useRef(settingsVersion);
+  useEffect(() => {
+    if (settingsVersion === lastSettingsVersionRef.current) return;
+    lastSettingsVersionRef.current = settingsVersion;
+    setSelectedId(undefined);
+    setDetail(undefined);
+  }, [settingsVersion]);
 
   useEffect(() => {
     function onResize() {

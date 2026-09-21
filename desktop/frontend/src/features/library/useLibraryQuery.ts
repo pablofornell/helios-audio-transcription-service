@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ACTIVE_POLL_MS, HeliosError, IDLE_POLL_MS, list, type ListFilter, type Status, type Transcription } from "../../lib";
+import {
+  ACTIVE_POLL_MS,
+  HeliosError,
+  IDLE_POLL_MS,
+  list,
+  useServerSettingsVersion,
+  type ListFilter,
+  type Status,
+  type Transcription,
+} from "../../lib";
 import { matchesSearch, type StatusFilterValue } from "./helpers";
 
 const PAGE_SIZE = 40;
@@ -72,6 +81,29 @@ export function useLibraryQuery(): UseLibraryQueryResult {
   useEffect(() => {
     fetchFirstPage();
   }, [fetchFirstPage]);
+
+  // Settings -> Server saving a new server: this view calls `list()`
+  // directly (see this module's own doc), so unlike `lib/store.ts`'s
+  // `transcriptionStore` it never hears about the change on its own.
+  // `settingsVersion` only changes after a save actually took effect, and
+  // the ref comparison (not just "did the effect run") is what keeps this
+  // from re-fetching on mount, when it is already equal to the version this
+  // hook first rendered with. Old rows are cleared up front rather than
+  // left showing under the loading state -- they describe a server that is
+  // no longer the effective one. `fetchFirstPage` itself resets
+  // `pagedRef` and bumps `requestIdRef`, so paging stands down and an
+  // old-server response already in flight is discarded the same way a
+  // filter change discards one.
+  const settingsVersion = useServerSettingsVersion();
+  const lastSettingsVersionRef = useRef(settingsVersion);
+  useEffect(() => {
+    if (settingsVersion === lastSettingsVersionRef.current) return;
+    lastSettingsVersionRef.current = settingsVersion;
+    setItems([]);
+    setCursor(undefined);
+    setHasMore(false);
+    fetchFirstPage();
+  }, [settingsVersion, fetchFirstPage]);
 
   // Derived, not read from a ref: the effect must re-subscribe when this
   // flips so a job that only just started is polled at the fast cadence

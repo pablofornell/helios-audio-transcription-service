@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ACTIVE_POLL_MS, IDLE_POLL_MS } from "../../lib";
+import { ACTIVE_POLL_MS, bumpServerSettingsVersion, IDLE_POLL_MS } from "../../lib";
 import { useLibraryQuery } from "./useLibraryQuery";
 
 const list = vi.hoisted(() => vi.fn());
@@ -109,5 +109,100 @@ describe("useLibraryQuery background refresh", () => {
 
     expect(result.current.items).toHaveLength(1);
     expect(result.current.error).toBeUndefined();
+  });
+});
+
+describe("useLibraryQuery server settings changes", () => {
+  // Settings -> Server saving a new server: this view calls list()
+  // directly, so it only hears about the change through the
+  // settings-version signal (see this hook's own doc).
+  it("clears rows and refetches page 1 when the server settings change", async () => {
+    list.mockResolvedValueOnce(page([row("a")]));
+    const { result } = renderHook(() => useLibraryQuery());
+    await flush();
+    expect(result.current.items).toHaveLength(1);
+
+    let resolveNewServer: (p: ReturnType<typeof page>) => void = () => {};
+    list.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveNewServer = resolve;
+        }),
+    );
+
+    act(() => {
+      bumpServerSettingsVersion();
+    });
+
+    // The old server's rows are cleared right away, not left showing under
+    // the loading state until the new server's page arrives.
+    expect(result.current.items).toHaveLength(0);
+    expect(result.current.loading).toBe(true);
+
+    resolveNewServer(page([row("b")]));
+    await flush();
+
+    expect(result.current.items.map((i) => i.id)).toEqual(["b"]);
+    // The refetch is page 1 again, not a continuation of wherever the old
+    // server's cursor had gotten to.
+    expect(list).toHaveBeenLastCalledWith(expect.not.objectContaining({ cursor: expect.anything() }));
+  });
+
+  // A response for a request that was already in flight when the settings
+  // changed describes the old server -- it must not land on top of a newer
+  // request's (the new server's) result just because it resolves later.
+  it("discards a stale response that resolves after the settings bump", async () => {
+    let resolveOldServer: (p: ReturnType<typeof page>) => void = () => {};
+    list.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveOldServer = resolve;
+        }),
+    );
+    const { result } = renderHook(() => useLibraryQuery());
+    expect(result.current.loading).toBe(true); // the mount fetch is in flight, unresolved
+
+    list.mockResolvedValueOnce(page([row("new-server-row")]));
+    act(() => {
+      bumpServerSettingsVersion();
+    });
+    await flush();
+
+    expect(result.current.items.map((i) => i.id)).toEqual(["new-server-row"]);
+
+    resolveOldServer(page([row("old-server-row")]));
+    await flush();
+
+    expect(result.current.items.map((i) => i.id)).toEqual(["new-server-row"]);
+  });
+
+  // A user who had paged past page 1 loses that extra state on a server
+  // change -- the background poll must not stay stood down for a server
+  // it never actually paged on.
+  it("re-enables the background refresh after the user had paged past page 1", async () => {
+    list.mockResolvedValueOnce(page([row("a")], "cursor-1"));
+    const { result } = renderHook(() => useLibraryQuery());
+    await flush();
+
+    list.mockResolvedValueOnce(page([row("b")]));
+    await act(async () => {
+      result.current.loadMore();
+    });
+    await flush();
+    expect(result.current.hasMore).toBe(false);
+
+    list.mockResolvedValueOnce(page([row("c")]));
+    act(() => {
+      bumpServerSettingsVersion();
+    });
+    await flush();
+    expect(result.current.items.map((i) => i.id)).toEqual(["c"]);
+
+    list.mockResolvedValueOnce(page([row("d")]));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(IDLE_POLL_MS + 50);
+    });
+    expect(list.mock.calls.length).toBeGreaterThan(0);
+    expect(result.current.items.map((i) => i.id)).toEqual(["d"]);
   });
 });
