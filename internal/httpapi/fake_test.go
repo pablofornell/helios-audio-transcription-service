@@ -5,13 +5,16 @@
 package httpapi_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -427,6 +430,28 @@ func (s *slowReader) Read(p []byte) (int, error) {
 	return s.r.Read(p)
 }
 
+// slowReadSeekCloser is slowReader's mirror for the download side: an
+// io.ReadSeekCloser (what Service.OpenSource returns) whose Read is paced
+// the same way, so a getAudio test can drive a download that takes a
+// deterministic, controllable amount of wall time. Seek is unpaced --
+// http.ServeContent uses it only to find the content length and to seek to
+// a Range's start, never in the timed copy loop itself -- and Close simply
+// satisfies io.Closer, since no test here needs to observe it.
+type slowReadSeekCloser struct {
+	*bytes.Reader
+	delay time.Duration
+}
+
+func (s *slowReadSeekCloser) Read(p []byte) (int, error) {
+	time.Sleep(s.delay)
+	if len(p) > slowReaderChunkBytes {
+		p = p[:slowReaderChunkBytes]
+	}
+	return s.Reader.Read(p)
+}
+
+func (s *slowReadSeekCloser) Close() error { return nil }
+
 func TestSubmitTranscription_SlowUploadSurvivesShortServerWriteTimeout(t *testing.T) {
 	// D2: net/http's http.Server.WriteTimeout starts counting the instant
 	// headers are read and covers the WHOLE request -- including the body
@@ -671,6 +696,57 @@ func TestGetTranscript_UnknownFormatIsBadRequest(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+// TestGetTranscript_DownloadQueryParam pins ?download=1's opt-in effect on
+// json specifically (txt/srt/vtt already carry Content-Disposition
+// regardless, per TestGetTranscript_Formats above), and that an
+// unrecognised value is silently treated the same as absent rather than
+// rejected -- see parseDownloadQuery's own doc for why.
+func TestGetTranscript_DownloadQueryParam(t *testing.T) {
+	succeeded := sampleTranscription()
+
+	cases := []struct {
+		name        string
+		format      string
+		download    string
+		disposition bool
+	}{
+		{"json without download is unchanged", "json", "", false},
+		{"json with download=1 becomes an attachment", "json", "1", true},
+		{"json with download=true becomes an attachment", "json", "true", true},
+		{"json with an unrecognised download value is ignored", "json", "yes", false},
+		{"txt without download is already an attachment", "txt", "", true},
+		{"txt with download=1 stays an attachment", "txt", "1", true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &fakeService{
+				getFn: func(ctx context.Context, id string) (*domain.Transcription, error) {
+					return succeeded, nil
+				},
+			}
+			r := httpapi.NewRouter(testDeps(svc, observability.NewRegistry(), false))
+
+			url := "/api/v1/transcriptions/" + succeeded.ID + "/transcript?format=" + tc.format
+			if tc.download != "" {
+				url += "&download=" + tc.download
+			}
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusOK, rec.Code)
+			disp := rec.Header().Get("Content-Disposition")
+			if tc.disposition {
+				assert.Contains(t, disp, "attachment")
+				assert.Contains(t, disp, succeeded.ID+"."+tc.format)
+			} else {
+				assert.Empty(t, disp)
+			}
+		})
+	}
+}
+
 // --- audio ------------------------------------------------------------
 
 func TestGetAudio_ServesContentAndHonoursRange(t *testing.T) {
@@ -738,6 +814,225 @@ func TestGetAudio_NonAudioMediaTypeIsServedAsOctetStream(t *testing.T) {
 	// The filename's embedded '"' must be escaped, not left to break out
 	// of the quoted-string and forge extra Content-Disposition parameters.
 	assert.Contains(t, disp, `filename="evil\".mp3"`)
+}
+
+// TestGetAudio_StreamingNotCanceledByRouteTimeout is Problem 1's first
+// protection, narrowed to the phase it actually covers: mountAPI does not
+// wrap GET .../audio in chimw.Timeout(routeTimeout), so once
+// Service.OpenSource has returned (bounded on its own by
+// h.audioOpenTimeout -- see TestGetAudio_OpenSourceTimeoutMaps504GatewayTimeout
+// below for THAT phase), http.ServeContent's own streaming is never given
+// chi's fixed-duration deadline, however small RouteTimeout is configured.
+// content here is paced (slowReadSeekCloser) to take several multiples of
+// an intentionally tiny RouteTimeout to fully stream: had this route still
+// been in chimw.Timeout's Group, the response would have been cut off with
+// a 504 partway through instead of completing.
+//
+// This only pins chimw.Timeout's own absence from the streaming phase, not
+// every possible source of context cancellation -- see getAudio's own doc:
+// the request context is still ultimately tied to the underlying
+// connection by net/http itself (it is canceled when the connection
+// drops), a separate concern this test does not exercise.
+func TestGetAudio_StreamingNotCanceledByRouteTimeout(t *testing.T) {
+	content := bytes.Repeat([]byte("x"), 4096)
+	tr := sampleTranscription()
+
+	const routeTimeout = 20 * time.Millisecond
+	svc := &fakeService{
+		openSourceFn: func(ctx context.Context, id string) (io.ReadSeekCloser, *domain.Transcription, error) {
+			// OpenSource itself returns immediately -- only the stream
+			// that follows is meant to outlast routeTimeout here.
+			return &slowReadSeekCloser{Reader: bytes.NewReader(content), delay: 5 * time.Millisecond}, tr, nil
+		},
+	}
+
+	deps := testDeps(svc, observability.NewRegistry(), false)
+	deps.RouteTimeout = routeTimeout
+
+	srv := httptest.NewServer(httpapi.NewRouter(deps))
+	defer srv.Close()
+
+	// len(content)/slowReaderChunkBytes chunks * 5ms is ~80ms, several
+	// multiples of the 20ms RouteTimeout above -- comfortably enough to
+	// have tripped chimw.Timeout partway through, had this route still
+	// been in its Group.
+	resp, err := http.Get(srv.URL + "/api/v1/transcriptions/" + tr.ID + "/audio")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, content, body)
+}
+
+// TestGetAudio_OpenSourceTimeoutMaps504GatewayTimeout is Problem 1's third
+// protection: h.audioOpenTimeout bounds Service.OpenSource itself, not
+// just the stream that follows it -- see getAudio's own doc, "Third, the
+// phase BEFORE any of the above even starts". Mounting this route outside
+// chimw.Timeout removed the bound chimw.Timeout used to put on this phase
+// too, not just on streaming, and a reviewer caught that a hung database
+// call inside OpenSource would otherwise now hold this handler's goroutine
+// open forever.
+//
+// Service.OpenSource here blocks until its own openCtx expires and returns
+// ctx.Err() -- a bare context.DeadlineExceeded, exactly how a hung
+// internal/postgres query surfaces one once its own context is canceled --
+// and the response must be exactly the 504 Gateway Timeout chimw.Timeout
+// itself would have produced for any other route (domain.CodeOf classifies
+// a bare context.DeadlineExceeded as ErrCodeTimeout on its own -- see its
+// own doc -- and errors.go's statusForCode maps that to
+// http.StatusGatewayTimeout), delivered promptly rather than after a hang.
+func TestGetAudio_OpenSourceTimeoutMaps504GatewayTimeout(t *testing.T) {
+	tr := sampleTranscription()
+
+	const routeTimeout = 20 * time.Millisecond
+	svc := &fakeService{
+		openSourceFn: func(ctx context.Context, id string) (io.ReadSeekCloser, *domain.Transcription, error) {
+			<-ctx.Done()
+			return nil, nil, ctx.Err()
+		},
+	}
+
+	deps := testDeps(svc, observability.NewRegistry(), false)
+	deps.RouteTimeout = routeTimeout
+
+	r := httpapi.NewRouter(deps)
+
+	start := time.Now()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/transcriptions/"+tr.ID+"/audio", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	elapsed := time.Since(start)
+
+	require.Equal(t, http.StatusGatewayTimeout, rec.Code)
+	assert.Less(t, elapsed, 2*time.Second,
+		"getAudio must return promptly once h.audioOpenTimeout elapses, not hang on a stuck Service.OpenSource")
+
+	var envelope errorEnvelope
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&envelope))
+	assert.Equal(t, "timeout", envelope.Error.Code)
+}
+
+// TestGetAudio_SlowDownloadSurvivesShortServerWriteTimeout is Problem 1's
+// second protection, the mirror image of
+// TestSubmitTranscription_SlowUploadSurvivesShortServerWriteTimeout: the
+// underlying *http.Server's WriteTimeout starts counting from the instant
+// headers are read and covers the whole response, so a large file streamed
+// to a merely slow (never stuck) client must survive a server-level
+// WriteTimeout far shorter than the download actually takes. getAudio's
+// deadlineResettingWriter renews the connection's write deadline to
+// AudioWriteIdleTimeout on every chunk actually written -- see that var's
+// own doc -- so a transfer that keeps making progress, however slowly,
+// never runs into either the original short server WriteTimeout or
+// AudioWriteIdleTimeout itself (each 30ms paced chunk below comfortably
+// renews well within the ten-minute production default, never overridden
+// by this test).
+func TestGetAudio_SlowDownloadSurvivesShortServerWriteTimeout(t *testing.T) {
+	content := bytes.Repeat([]byte("x"), 4096)
+	tr := sampleTranscription()
+
+	svc := &fakeService{
+		openSourceFn: func(ctx context.Context, id string) (io.ReadSeekCloser, *domain.Transcription, error) {
+			return &slowReadSeekCloser{Reader: bytes.NewReader(content), delay: 30 * time.Millisecond}, tr, nil
+		},
+	}
+
+	deps := testDeps(svc, observability.NewRegistry(), false)
+
+	srv := httptest.NewUnstartedServer(httpapi.NewRouter(deps))
+	srv.Config.WriteTimeout = 150 * time.Millisecond // far shorter than the paced download below
+	srv.Start()
+	defer srv.Close()
+
+	// len(content)/slowReaderChunkBytes chunks * 30ms is well past the
+	// 150ms server WriteTimeout above; each individual chunk's write
+	// still lands comfortably inside AudioWriteIdleTimeout, which is all
+	// that matters once deadlineResettingWriter is renewing it per chunk.
+	resp, err := http.Get(srv.URL + "/api/v1/transcriptions/" + tr.ID + "/audio")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, content, body)
+}
+
+// closeSignalingReadSeekCloser wraps an io.ReadSeeker and sends on closed
+// the instant Close is called, so a test can observe getAudio actually
+// returning (defer rc.Close() runs on every path out of the handler)
+// without depending on anything the client side sees -- which, for
+// TestGetAudio_StalledDownloadHitsIdleDeadline below, deliberately never
+// reads far enough to observe the response complete or fail on its own.
+type closeSignalingReadSeekCloser struct {
+	io.ReadSeeker
+	closed chan<- struct{}
+}
+
+func (c *closeSignalingReadSeekCloser) Close() error {
+	select {
+	case c.closed <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+// TestGetAudio_StalledDownloadHitsIdleDeadline is the regression test for
+// the failure a reviewer of an earlier version of this fix reproduced:
+// that version cleared getAudio's write deadline outright rather than
+// renewing it, so a client that opened the connection and then never read
+// a single byte of the response body left the handler -- and the
+// goroutine, file handle and Service.OpenSource reader behind it -- blocked
+// indefinitely. AudioWriteIdleTimeout is shrunk here so the test does not
+// itself have to wait out the ten-minute production default; the content
+// is large enough (64 MiB) to comfortably exceed the combined kernel send/
+// receive buffers on a loopback connection nobody is draining, so the
+// server is still mid-transfer, genuinely blocked on a Write, when the
+// idle deadline elapses.
+func TestGetAudio_StalledDownloadHitsIdleDeadline(t *testing.T) {
+	old := httpapi.AudioWriteIdleTimeout
+	httpapi.AudioWriteIdleTimeout = 50 * time.Millisecond
+	defer func() { httpapi.AudioWriteIdleTimeout = old }()
+
+	content := bytes.Repeat([]byte("x"), 64<<20) // 64 MiB
+	tr := sampleTranscription()
+
+	closed := make(chan struct{}, 1)
+	svc := &fakeService{
+		openSourceFn: func(ctx context.Context, id string) (io.ReadSeekCloser, *domain.Transcription, error) {
+			return &closeSignalingReadSeekCloser{ReadSeeker: bytes.NewReader(content), closed: closed}, tr, nil
+		},
+	}
+
+	srv := httptest.NewServer(httpapi.NewRouter(testDeps(svc, observability.NewRegistry(), false)))
+	defer srv.Close()
+
+	// A raw connection, deliberately read from only up through the
+	// response headers below and never again: net/http's own Client
+	// would otherwise let the kernel drain the socket into buffers of
+	// its own behind the scenes, defeating the entire point of "the
+	// client never reads".
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	require.NoError(t, err)
+	defer conn.Close()
+
+	_, err = fmt.Fprintf(conn, "GET /api/v1/transcriptions/%s/audio HTTP/1.1\r\nHost: %s\r\n\r\n",
+		tr.ID, srv.Listener.Addr().String())
+	require.NoError(t, err)
+
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	start := time.Now()
+	select {
+	case <-closed:
+		assert.Less(t, time.Since(start), 2*time.Second,
+			"getAudio took far longer than AudioWriteIdleTimeout to give up on a stalled client")
+	case <-time.After(2 * time.Second):
+		t.Fatal("getAudio did not return within a bounded time after the client stopped reading -- the write deadline was never renewed/enforced")
+	}
 }
 
 // --- not found, panic recovery -----------------------------------------

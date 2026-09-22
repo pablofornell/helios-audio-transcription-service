@@ -17,6 +17,8 @@ import {
   type Transcription,
   type TranscriptFormat,
 } from "../../lib";
+import { audioDownloadUrl } from "../../lib/browser/api";
+import { hasWailsRuntime } from "../../lib/runtime";
 import { errorCopyFor } from "../transcribe/errorCopy";
 import { isWithinOwnedWidget } from "./helpers";
 import styles from "./DetailPanel.module.css";
@@ -297,7 +299,14 @@ export function DetailPanel({ transcription, onClose, onRetry, onSaveAs, onDelet
           <hr className={styles.hr} />
           <h3 className={styles.sectionHeading}>Source audio</h3>
           <audio ref={audioRef} className={styles.audioPlayer} src={audioSrc} controls preload="none" />
-          <MediaActions location={mediaLoc} opening={opening} revealing={revealing} onOpen={handleOpen} onReveal={handleReveal} />
+          <MediaActions
+            location={mediaLoc}
+            opening={opening}
+            revealing={revealing}
+            onOpen={handleOpen}
+            onReveal={handleReveal}
+            downloadHref={audioDownloadUrl(transcription.id)}
+          />
 
           {transcription.status === "succeeded" && result ? (
             <>
@@ -395,26 +404,53 @@ interface MediaActionsProps {
   revealing: boolean;
   onOpen: () => void;
   onReveal: () => void;
+  /** `../../lib/browser/api.ts`'s `audioDownloadUrl(transcription.id)` — only ever rendered in a browser tab (see below), but always passed so this component itself stays the one place deciding whether to use it. */
+  downloadHref: string;
 }
 
 /**
- * Open/Reveal are always offered (never gated on `AudioLocation.exists`):
- * `app.App.OpenAudio`/`RevealInFileManager` transparently download and
- * cache the source audio first if this process does not already hold a
- * local copy (see `desktop/reveal.go`'s own doc — unlike the sibling
- * ingestion project, this remote-only client never has direct filesystem
- * access to the server's storage at all). `location.exists` only changes
- * the label, so a first click that will trigger a download reads
- * differently from one that opens instantly. A rejected click (a browser
- * tab, which has no such capability at all — see `browser/api.ts`'s doc)
- * is handled by the caller's own catch, not here.
+ * Desktop (`hasWailsRuntime()`): Open/Reveal are always offered (never
+ * gated on `AudioLocation.exists`): `app.App.OpenAudio`/
+ * `RevealInFileManager` transparently download and cache the source audio
+ * first if this process does not already hold a local copy (see
+ * `desktop/reveal.go`'s own doc — unlike the sibling ingestion project,
+ * this remote-only client never has direct filesystem access to the
+ * server's storage at all). `location.exists` only changes the label, so a
+ * first click that will trigger a download reads differently from one
+ * that opens instantly.
+ *
+ * Browser tab: neither action has any equivalent at all (a web page can
+ * neither ask the OS to open a file with its default handler nor open the
+ * host OS's file manager — `../../lib/browser/api.ts`'s `openAudio`/
+ * `revealInFileManager` always reject `"media_unavailable"`), so this
+ * renders a plain `<a download>` at `downloadHref` instead — the browser's
+ * own download manager is the equivalent capability here, the same as
+ * `SaveAsDialog`'s browser-tab transcript download. `target="_blank"` (plus
+ * `rel="noopener"`) for the exact same reason `SaveAsDialog`'s
+ * `triggerBrowserDownload` uses it: against a saved, cross-origin server
+ * (`../../lib/browser/serverConfig.ts`'s `apiBase()`) the `download`
+ * attribute is ignored cross-origin, so a response that is not actually an
+ * attachment (the audio was swept by retention, the transcription was
+ * deleted elsewhere, the saved server is unreachable) would otherwise
+ * navigate this whole SPA tab to a 404/error page and lose all its state;
+ * a real attachment download still triggers with no lingering tab left
+ * behind.
  */
-function MediaActions({ location, opening, revealing, onOpen, onReveal }: MediaActionsProps) {
+function MediaActions({ location, opening, revealing, onOpen, onReveal, downloadHref }: MediaActionsProps) {
   if (location === undefined) {
     return (
       <div className={styles.actions}>
         <Skeleton width={72} height={32} />
         <Skeleton width={140} height={32} />
+      </div>
+    );
+  }
+  if (!hasWailsRuntime()) {
+    return (
+      <div className={styles.actions}>
+        <a className={styles.downloadLink} href={downloadHref} download target="_blank" rel="noopener">
+          Download audio
+        </a>
       </div>
     );
   }

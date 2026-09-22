@@ -186,6 +186,51 @@ describe("transcript", () => {
   });
 });
 
+// transcriptDownloadUrl/audioDownloadUrl never call fetch at all — they are
+// pure string builders `SaveAsDialog`/`DetailPanel`'s browser-tab actions
+// navigate a temporary/real <a> at (see those modules' own docs). No
+// fetchMock assertions below are meaningful for them; only the returned
+// string is.
+describe("transcriptDownloadUrl", () => {
+  it("builds a same-origin relative URL with format and download=1 when nothing is saved", () => {
+    expect(api.transcriptDownloadUrl("id-1", "srt")).toBe("/api/v1/transcriptions/id-1/transcript?format=srt&download=1");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("covers every TranscriptFormat", () => {
+    expect(api.transcriptDownloadUrl("id-1", "txt")).toBe("/api/v1/transcriptions/id-1/transcript?format=txt&download=1");
+    expect(api.transcriptDownloadUrl("id-1", "vtt")).toBe("/api/v1/transcriptions/id-1/transcript?format=vtt&download=1");
+    expect(api.transcriptDownloadUrl("id-1", "json")).toBe("/api/v1/transcriptions/id-1/transcript?format=json&download=1");
+  });
+
+  it("becomes an absolute URL against a saved cross-origin server — a non-empty apiBase()", async () => {
+    await api.setServerSettings("example.com", 9090);
+    expect(api.transcriptDownloadUrl("id-1", "txt")).toBe("http://example.com:9090/api/v1/transcriptions/id-1/transcript?format=txt&download=1");
+  });
+
+  it("URL-encodes an id with characters that would otherwise break the path/query", () => {
+    expect(api.transcriptDownloadUrl("weird id/with?stuff&more", "txt")).toBe(
+      "/api/v1/transcriptions/weird%20id%2Fwith%3Fstuff%26more/transcript?format=txt&download=1",
+    );
+  });
+});
+
+describe("audioDownloadUrl", () => {
+  it("builds a same-origin relative URL when nothing is saved", () => {
+    expect(api.audioDownloadUrl("id-1")).toBe("/api/v1/transcriptions/id-1/audio");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("matches the same origin transcript()/DetailPanel's <audio src> already resolve against — becomes absolute against a saved cross-origin server", async () => {
+    await api.setServerSettings("example.com", 9090);
+    expect(api.audioDownloadUrl("id-1")).toBe("http://example.com:9090/api/v1/transcriptions/id-1/audio");
+  });
+
+  it("URL-encodes an id with characters that would otherwise break the path", () => {
+    expect(api.audioDownloadUrl("weird id/with?stuff")).toBe("/api/v1/transcriptions/weird%20id%2Fwith%3Fstuff/audio");
+  });
+});
+
 describe("health", () => {
   it("GETs /readyz (not under /api/v1) and returns the report as-is on 200", async () => {
     const report = { ok: true, checks: { database: { ok: true, detail: "" } } };
@@ -320,6 +365,39 @@ describe("DetailPanel's <audio> src follows the effective server", () => {
     });
 
     await waitFor(() => expect(audioSrc()).toBe("http://example.com:9090/api/v1/transcriptions/detail-audio-2/audio"));
+  });
+});
+
+// MediaActions (DetailPanel.tsx) has no OS to hand Open/Reveal off to from
+// a browser tab — see openAudio/revealInFileManager's own docs above — so
+// it renders a plain download link instead. Same "no fake Wails runtime"
+// premise as the describe block above.
+describe("DetailPanel's MediaActions in a browser tab", () => {
+  it("renders a 'Download audio' link at audioDownloadUrl instead of Open/Reveal buttons", async () => {
+    const transcription = makeWireTranscription({ id: "detail-dl-1" });
+    const { container } = render(
+      createElement(DetailPanel, {
+        transcription,
+        onClose: () => {},
+        onRetry: () => {},
+        onSaveAs: () => {},
+        onDelete: () => {},
+        overlay: false,
+      }),
+    );
+
+    await waitFor(() => expect(container.querySelector("a[download]")).not.toBeNull());
+    const link = container.querySelector("a[download]") as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe(api.audioDownloadUrl("detail-dl-1"));
+    expect(link.textContent).toBe("Download audio");
+    expect(container.textContent).not.toMatch(/Open|Reveal in file manager/);
+    // A saved, cross-origin server ignores `download` entirely, so a
+    // non-attachment response (audio swept by retention, transcription
+    // deleted elsewhere, server unreachable) would otherwise replace this
+    // whole SPA tab — `target="_blank"` sends that failure to a throwaway
+    // tab instead (see `MediaActions`'s own doc).
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener");
   });
 });
 

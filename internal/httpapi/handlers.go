@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,7 +38,24 @@ type handlers struct {
 	// the same bound chimw.Timeout already gives the handler to run in, so
 	// the write deadline is never the thing that cuts an otherwise-allowed
 	// upload short.
+	//
+	// getAudio, the mirror-image download route, does NOT reuse this value
+	// for its OWN write deadline -- see deadlineResettingWriter's doc for
+	// why it renews a stall deadline per chunk instead of extending a
+	// single one sized off RouteTimeout. It does reuse RouteTimeout itself
+	// for a different purpose: audioOpenTimeout, below.
 	uploadWriteTimeout time.Duration
+	// audioOpenTimeout bounds getAudio's Service.OpenSource call ONLY --
+	// never the stream that follows it -- via a context.WithTimeout
+	// derived from the request's own context, right before that one call.
+	// See getAudio's own doc for why this exists (mounting the route
+	// outside chimw.Timeout removed the bound chimw.Timeout used to put on
+	// THIS phase, not just the streaming phase) and why canceling that
+	// derived context the instant OpenSource returns cannot also cut the
+	// stream short. Set from RouterDeps.RouteTimeout, the same value
+	// chimw.Timeout would have bounded this call by had the route stayed
+	// in its Group.
+	audioOpenTimeout time.Duration
 }
 
 // maxOptionsPartBytes bounds how much of the multipart request's `options`
@@ -376,14 +394,24 @@ func (h *handlers) retryTranscription(w http.ResponseWriter, r *http.Request) {
 // The requested format is validated before the transcription is even
 // looked up, so an unknown `format` is rejected the same way regardless of
 // whether id exists.
+//
+// txt/srt/vtt always carry Content-Disposition: attachment, since a
+// browser would otherwise try to render a subtitle file inline. json does
+// not, by default, since it is the format most callers consume
+// programmatically rather than download -- but a caller that does want to
+// save it can opt in with `?download=1` (or `download=true`), which forces
+// the same attachment header json would otherwise never get. The param has
+// no effect on txt/srt/vtt, which are already attachments regardless.
 func (h *handlers) getTranscript(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	q := r.URL.Query()
 
-	format, err := transcript.ParseFormat(r.URL.Query().Get("format"))
+	format, err := transcript.ParseFormat(q.Get("format"))
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
+	download := parseDownloadQuery(q.Get("download"))
 
 	t, err := h.service.Get(r.Context(), id)
 	if err != nil {
@@ -402,11 +430,23 @@ func (h *handlers) getTranscript(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", format.ContentType())
-	if format != transcript.FormatJSON {
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.%s"`, id, format))
+	if format != transcript.FormatJSON || download {
+		w.Header().Set("Content-Disposition", contentDispositionAttachment(id+"."+string(format)))
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
+}
+
+// parseDownloadQuery interprets the `download` query parameter's raw
+// string value: "1" or "true" opt in, anything else -- including an empty
+// string (absent) and any value this does not recognise -- is treated as
+// not set. An unrecognised value is deliberately ignored rather than
+// rejected as ErrCodeInvalidInput, unlike `format` or `status` elsewhere in
+// this package: it is a pure opt-in nicety with an unambiguous default
+// (unset), so there is nothing a caller could get "wrong" that is worth a
+// 400 for.
+func parseDownloadQuery(raw string) bool {
+	return raw == "1" || raw == "true"
 }
 
 // getAudio implements GET /api/v1/transcriptions/{id}/audio: it streams
@@ -426,11 +466,73 @@ func (h *handlers) getTranscript(w http.ResponseWriter, r *http.Request) {
 // Content-Disposition: attachment (never rendered inline, whatever the
 // Content-Type), and downgrading anything outside audio/* or video/* to
 // application/octet-stream -- see safeAudioContentType.
+//
+// This handler is the mirror image of submitTranscription's own upload
+// problem: a large file, streamed to a merely slow (not stuck) client over
+// a slow link, must not be cut off by any of the three things that would
+// otherwise bound it.
+//
+// First, the streaming phase's total duration: mountAPI does not wrap this
+// route in chimw.Timeout at all, so the request context http.ServeContent
+// runs under is never given a fixed-duration deadline by chi's own
+// middleware stack, however small RouteTimeout is configured. (net/http's
+// own request context is a separate matter: it is still tied to the
+// underlying connection and is canceled when the client drops it.
+// HTTP_READ_TIMEOUT does not cancel it mid-download: for a body-less GET,
+// net/http clears the read deadline before the handler starts. localfs's
+// OpenSource returns a plain *os.File, whose Read and Seek never consult
+// ctx at all -- a future storage backend whose reader DOES check context
+// per-Read would need this route's ctx handling looked at again.)
+//
+// Second, the streaming phase's staleness: the underlying *http.Server's
+// WriteTimeout, which starts counting from the instant headers are read
+// and would otherwise cut the transfer off partway through, is answered by
+// wrapping w in deadlineResettingWriter below: unlike submitTranscription,
+// which extends its write deadline once to a bound sized off RouteTimeout
+// (a value this package already has in hand, chosen for the upload's total
+// size), getAudio has no equivalent size hint to bound a download by -- the
+// original file can be arbitrarily large, and a single fixed deadline
+// picked without one is just as likely to be too short for some download
+// as it is to leave a genuinely stalled connection (and the goroutine,
+// file handle and Service.OpenSource reader behind it) open indefinitely,
+// which a first version of this fix did and a reviewer caught: a client
+// that simply never reads its response body kept this handler blocked well
+// past any sane bound. deadlineResettingWriter renews the deadline on
+// every chunk actually written instead, so only a stall -- no forward
+// progress at all for AudioWriteIdleTimeout -- ends the connection, never
+// a merely slow-but-moving transfer.
+//
+// Third, the phase BEFORE any of the above even starts: mounting this
+// route outside chimw.Timeout removed the bound chimw.Timeout used to put
+// on Service.OpenSource itself, not just on the streaming that follows
+// it -- a reviewer caught this too, pointing out that OpenSource reaches
+// the database (to look id up) before it ever reaches local disk, and a
+// hung database call would now hold this handler's goroutine (and
+// whatever connection-pool slot it is waiting on) open forever, same as
+// before this fix but now with nothing bounding it at all. h.audioOpenTimeout
+// (sized off the same RouteTimeout chimw.Timeout would have used) answers
+// that with a context.WithTimeout scoped to the OpenSource call alone,
+// below -- cancel runs the instant OpenSource returns, success or not,
+// which is safe precisely because it runs BEFORE http.ServeContent ever
+// starts reading from rc: canceling a context already returned from does
+// nothing to a plain io.ReadSeekCloser like localfs's *os.File, whose Read
+// and Seek take no context at all, so the stream itself, and everything
+// after this point in the handler, is untouched by openCtx's fate.
 func (h *handlers) getAudio(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
-	rc, t, err := h.service.OpenSource(r.Context(), id)
+	openCtx, cancel := context.WithTimeout(r.Context(), h.audioOpenTimeout)
+	rc, t, err := h.service.OpenSource(openCtx, id)
+	cancel()
 	if err != nil {
+		// A bare context.DeadlineExceeded from openCtx's own timeout (as
+		// opposed to one domain.Wrap already turned into a *domain.Error,
+		// e.g. by internal/postgres's own query-cancellation handling) is
+		// classified by domain.CodeOf itself -- see its own doc -- into
+		// ErrCodeTimeout, the same code a hung handler still inside
+		// chimw.Timeout's Group would have produced, so writeError maps
+		// this the same way it would have mapped that: 504 Gateway Timeout,
+		// matching chimw.Timeout's own StatusGatewayTimeout response.
 		writeError(w, r, err)
 		return
 	}
@@ -449,8 +551,95 @@ func (h *handlers) getAudio(w http.ResponseWriter, r *http.Request) {
 	// only sniffs/sets it when the header is still empty -- never
 	// overrides safeAudioContentType's classification with a sniff of its
 	// own.
-	http.ServeContent(w, r, name, t.CreatedAt, rc)
+	//
+	// dw is constructed here, after OpenSource has already returned,
+	// rather than at the top of the handler: OpenSource opens a local
+	// file (see localfs), never a caller-controlled duration, so it is
+	// left to finish inside whatever write deadline the connection
+	// already inherited from before this handler ran, exactly as an
+	// ordinary, non-streaming handler would -- only the transfer
+	// http.ServeContent is about to drive needs AudioWriteIdleTimeout's
+	// renewed-per-chunk deadline instead of a single fixed one.
+	dw := newDeadlineResettingWriter(w)
+	http.ServeContent(dw, r, name, t.CreatedAt, rc)
 }
+
+// AudioWriteIdleTimeout bounds how long getAudio's connection may go
+// without a successful write to the client -- how STALE it may get, not
+// how long the download as a whole may take (mountAPI already leaves the
+// download's total duration unbounded by chimw.Timeout -- see that func's
+// own doc). A truly large file over a genuinely slow (but still moving)
+// connection can take far longer than ten minutes to finish; ten minutes
+// with NO forward progress at all, by contrast, means the peer has stopped
+// reading (the kernel's send buffer is full and staying full) or the
+// connection is simply gone, and holding onto the opened source file and
+// this goroutine any longer than that buys nothing -- this is exactly the
+// failure a reviewer of an earlier version of this fix (which cleared the
+// write deadline outright) reproduced: a client that opens the request and
+// never reads its body kept the handler, and everything it holds open,
+// blocked indefinitely.
+//
+// A package-level var rather than an unexported constant purely so this
+// package's own tests (httpapi_test, an external package) can shrink it
+// to something a test can wait out in milliseconds; production callers
+// have no reason to ever touch it.
+var AudioWriteIdleTimeout = 10 * time.Minute
+
+// deadlineResettingWriter wraps an http.ResponseWriter so every successful
+// Write renews the underlying connection's write deadline by
+// AudioWriteIdleTimeout, via http.NewResponseController -- see that var's
+// own doc for the reasoning. http.ServeContent's own copy loop already
+// drives Write repeatedly (a chunk at a time for a plain io.ReadSeeker
+// source, since neither side here implements the WriterTo/ReaderFrom fast
+// path that would skip Write's call chain), so this renews on very nearly
+// every chunk reaching the wire without getAudio needing a copy loop of
+// its own.
+//
+// http.NewResponseController walks an Unwrap() http.ResponseWriter chain
+// to find the real, connection-backed ResponseWriter underneath whatever
+// middleware already wrapped w before getAudio ever saw it
+// (chimw.NewWrapResponseWriter in newRequestLogger, otelhttp's own
+// wrapper) -- both support Unwrap, so the controller built at construction
+// time already reaches the same deadline the transport itself would
+// otherwise silently enforce. deadlineResettingWriter implements Unwrap
+// itself too, in turn, so anything that wraps IT further (nothing in this
+// package does today) can still see through to the real writer rather than
+// dead-ending here.
+//
+// SetWriteDeadline failing -- http.ErrNotSupported under
+// httptest.ResponseRecorder, used by this package's own non-streaming
+// tests, or any other error -- is deliberately swallowed: a ResponseWriter
+// with no underlying connection deadline to renew has nothing for this
+// wrapper to protect against either, and there is no reasonable response
+// to an inability to *shorten* a timeout that was never going to fire.
+type deadlineResettingWriter struct {
+	http.ResponseWriter
+	controller *http.ResponseController
+}
+
+// newDeadlineResettingWriter wraps w and renews the write deadline once
+// immediately, before the caller writes anything, so the deadline inherited
+// from before ServeContent started (see getAudio's own doc on why that
+// deadline is left as-is up to this point) is replaced by
+// AudioWriteIdleTimeout before the first byte of the body is due.
+func newDeadlineResettingWriter(w http.ResponseWriter) *deadlineResettingWriter {
+	d := &deadlineResettingWriter{ResponseWriter: w, controller: http.NewResponseController(w)}
+	d.renewWriteDeadline()
+	return d
+}
+
+func (d *deadlineResettingWriter) renewWriteDeadline() {
+	_ = d.controller.SetWriteDeadline(time.Now().Add(AudioWriteIdleTimeout))
+}
+
+func (d *deadlineResettingWriter) Write(p []byte) (int, error) {
+	d.renewWriteDeadline()
+	return d.ResponseWriter.Write(p)
+}
+
+// Unwrap satisfies the http.ResponseController convention -- see
+// deadlineResettingWriter's own doc.
+func (d *deadlineResettingWriter) Unwrap() http.ResponseWriter { return d.ResponseWriter }
 
 // safeAudioContentType returns mediaType unchanged when its base type
 // (ignoring parameters like charset) is audio/* or video/*, and

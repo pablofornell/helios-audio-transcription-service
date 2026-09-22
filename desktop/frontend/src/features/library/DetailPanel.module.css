@@ -247,3 +247,37 @@
   font-size: var(--fs-200);
   color: var(--text-tertiary);
 }
+
+/* Browser-tab "Download audio" — a plain <a download>, not a <Button> (that
+   component only ever renders a real <button>), styled to match its
+   neutral/sm variant (components/Button.module.css) so it reads as the
+   same kind of action Open/Reveal are on desktop. */
+.downloadLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--control-h-sm);
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: var(--fs-200);
+  font-weight: var(--fw-medium);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.downloadLink:hover {
+  background: var(--bg-hover);
+}
+
+.downloadLink:active {
+  background: var(--bg-active);
+  transform: translateY(0.5px);
+}
+
+.downloadLink:focus-visible {
+  outline: var(--ring-w) solid var(--ring-color);
+  outline-offset: var(--ring-offset);
+}

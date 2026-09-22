@@ -137,7 +137,9 @@ type RouterDeps struct {
 //     innermost (closest to the handler) so requestLogger, recoverer and
 //     metrics all still see its 504 like any other response. It is
 //     applied per-route below, under /api/v1 only, so /healthz, /readyz
-//     and /metrics are never subject to it.
+//     and /metrics are never subject to it -- and, within /api/v1, so is
+//     GET .../audio: see mountAPI's own doc for why that one route opts
+//     out.
 func NewRouter(deps RouterDeps) http.Handler {
 	r := chi.NewRouter()
 
@@ -156,6 +158,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 		health:             deps.Health,
 		maxUploadBytes:     deps.MaxUploadBytes,
 		uploadWriteTimeout: deps.RouteTimeout,
+		audioOpenTimeout:   deps.RouteTimeout,
 	}
 
 	mountAPI(r, h, deps.RouteTimeout)
@@ -169,21 +172,47 @@ func NewRouter(deps RouterDeps) http.Handler {
 	return r
 }
 
-// mountAPI registers every /api/v1/* route from CONTRACT.md section 6,
-// all bounded by chimw.Timeout(routeTimeout) -- unlike BLUEPRINT, this
-// service has no long-lived streaming endpoint that needs to opt out of
-// it.
+// mountAPI registers every /api/v1/* route from CONTRACT.md section 6.
+// Every route except GET .../audio is bounded by chimw.Timeout(routeTimeout),
+// applied via api.Group so its own, isolated middleware stack does not leak
+// onto anything mounted outside it -- unlike BLUEPRINT, this service has no
+// *other* long-lived streaming endpoint that needs to opt out of it.
+//
+// GET .../audio is that one exception: it streams a potentially large file
+// (the original upload) back to a potentially slow client via
+// http.ServeContent, and chimw.Timeout would cancel the request's context
+// -- and, on top of that, unconditionally write its own 504 Gateway Timeout
+// through a wrapped ResponseWriter -- partway through an otherwise
+// perfectly healthy, merely slow, download the instant routeTimeout
+// elapses. It is mounted directly on api instead, so it still gets every
+// middleware in NewRouter's top-level stack (CORS, tracing, logging,
+// recovery, metrics) but never chimw.Timeout. getAudio does not simply go
+// unbounded in chimw.Timeout's place, though: its own doc covers the two
+// replacement protections this loses by opting out (one for the streaming
+// phase's total duration, one for its staleness) plus a third,
+// h.audioOpenTimeout, that keeps the phase BEFORE streaming even starts
+// (Service.OpenSource, which reaches the database) bounded the same
+// routeTimeout would have bounded it by, since removing chimw.Timeout
+// removed that bound too, not just the one on the streaming that follows.
+// GET .../transcript is NOT given the same exemption: it renders straight
+// from the already-fetched domain.Result into memory (transcript.Render)
+// rather than streaming a stored file of arbitrary size, so it stays
+// bounded like every other route below.
 func mountAPI(r chi.Router, h *handlers, routeTimeout time.Duration) {
 	r.Route("/api/v1", func(api chi.Router) {
-		api.Use(chimw.Timeout(routeTimeout))
+		api.Group(func(bounded chi.Router) {
+			bounded.Use(chimw.Timeout(routeTimeout))
 
-		api.Post("/transcriptions", h.submitTranscription)
-		api.Get("/transcriptions", h.listTranscriptions)
-		api.Get("/transcriptions/{id}", h.getTranscription)
-		api.Delete("/transcriptions/{id}", h.deleteTranscription)
-		api.Post("/transcriptions/{id}/cancel", h.cancelTranscription)
-		api.Post("/transcriptions/{id}/retry", h.retryTranscription)
-		api.Get("/transcriptions/{id}/transcript", h.getTranscript)
+			bounded.Post("/transcriptions", h.submitTranscription)
+			bounded.Get("/transcriptions", h.listTranscriptions)
+			bounded.Get("/transcriptions/{id}", h.getTranscription)
+			bounded.Delete("/transcriptions/{id}", h.deleteTranscription)
+			bounded.Post("/transcriptions/{id}/cancel", h.cancelTranscription)
+			bounded.Post("/transcriptions/{id}/retry", h.retryTranscription)
+			bounded.Get("/transcriptions/{id}/transcript", h.getTranscript)
+		})
+
+		// Not part of the Group above -- see this func's own doc.
 		api.Get("/transcriptions/{id}/audio", h.getAudio)
 	})
 }

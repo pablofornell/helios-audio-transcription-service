@@ -314,12 +314,24 @@ paths:
           description: Defaults to json.
           schema:
             $ref: "#/components/schemas/TranscriptFormat"
+        - name: download
+          in: query
+          description: >
+            Opt-in only: "1" or "true" force a
+            `Content-Disposition: attachment; filename="<id>.<format>"` header on a
+            json response, which otherwise never carries one (see the 200 response
+            below). Any other value, including an unrecognised one, is treated the
+            same as omitting the parameter entirely. Has no effect on txt/srt/vtt,
+            which already carry that header regardless.
+          schema:
+            type: string
       responses:
         "200":
           description: >
-            The transcript in the requested format. txt/srt/vtt responses also carry a
-            `Content-Disposition: attachment; filename="<id>.<format>"` header; json
-            does not.
+            The transcript in the requested format. txt/srt/vtt responses always carry
+            a `Content-Disposition: attachment; filename="<id>.<format>"` header; json
+            does too, but only when `?download=1` (or `download=true`) was given --
+            otherwise it does not.
           content:
             application/json:
               schema:
@@ -368,6 +380,11 @@ paths:
         finishes (see docs/ARCHITECTURE.md). Served via net/http's ServeContent, so
         Range requests, conditional GETs and Content-Type sniffing from the stored
         Audio.mediaType all work for free.
+
+
+        This route is not subject to the server's usual per-request time budget: a
+        large file over a slow connection is allowed to take as long as it takes,
+        rather than being cut off after a fixed number of seconds.
       parameters:
         - name: Range
           in: header

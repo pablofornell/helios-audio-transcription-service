@@ -205,7 +205,37 @@ export function transcript(id: string, format: TranscriptFormat): Promise<string
   return requestText(apiPath(`/transcriptions/${id}/transcript?format=${format}`), undefined, [200]);
 }
 
-/** A browser tab has no arbitrary local folder to write into — there is no `destDir` a page could ever supply. Always rejects; the format switcher's "Copy" action is the browser-tab equivalent. */
+/**
+ * The URL a browser tab's own "Save as…"/"Save transcript as…" navigates a
+ * temporary `<a download>` to (see `../../features/library/SaveAsDialog.tsx`)
+ * — there is no `destDir` a page could ever supply (see `saveTranscript`
+ * below), so downloading through the browser's own download manager is
+ * this adapter's equivalent. `download=1` is what makes
+ * `internal/httpapi`'s `getTranscript` send `Content-Disposition:
+ * attachment` for every format, `json` included (which otherwise renders
+ * inline) — the same header `transcript()`'s txt/srt/vtt requests above
+ * already get without it. `id` is URL-encoded defensively; transcription
+ * ids are server-generated UUIDs today, never user input, but a path
+ * segment built by string interpolation should not assume that stays true.
+ */
+export function transcriptDownloadUrl(id: string, format: TranscriptFormat): string {
+  return apiPath(`/transcriptions/${encodeURIComponent(id)}/transcript?format=${encodeURIComponent(format)}&download=1`);
+}
+
+/**
+ * The URL `DetailPanel`'s "Download audio" browser-tab action (see
+ * `../../features/library/DetailPanel.tsx`'s `MediaActions`) points an
+ * `<a download>` at — the exact same URL its `<audio>` element already
+ * uses as `src`, since `internal/httpapi`'s `getAudio` already sends
+ * `Content-Disposition: attachment` unconditionally (see that handler's
+ * own doc) and needs no `download=1` query param the way the transcript
+ * endpoint does.
+ */
+export function audioDownloadUrl(id: string): string {
+  return apiPath(`/transcriptions/${encodeURIComponent(id)}/audio`);
+}
+
+/** A browser tab has no arbitrary local folder to write into — there is no `destDir` a page could ever supply. Always rejects; `transcriptDownloadUrl` above (a real browser download) is the browser-tab equivalent. */
 export function saveTranscript(_id: string, _format: TranscriptFormat, _destDir: string): Promise<string> {
   return unsupportedInBrowser("Saving the transcript to a folder");
 }
@@ -227,12 +257,12 @@ function unsupportedInBrowser(action: string): Promise<never> {
   );
 }
 
-/** A web page cannot ask the OS to open a file with its default handler. Rejects with `"media_unavailable"` — the exact code `audioLocation`'s `exists: false` already trains the UI to expect from this action. */
+/** A web page cannot ask the OS to open a file with its default handler. Rejects with `"media_unavailable"` — the exact code `audioLocation`'s `exists: false` already trains the UI to expect from this action. `DetailPanel`'s `MediaActions` never actually calls this from a browser tab (it renders `audioDownloadUrl` as a plain download link there instead), but the rejection stays correct as a fallback contract. */
 export function openAudio(_id: string): Promise<void> {
   return unsupportedInBrowser("Opening the file");
 }
 
-/** A web page cannot open the host OS's file manager. Same `"media_unavailable"` rejection as `openAudio`. */
+/** A web page cannot open the host OS's file manager. Same `"media_unavailable"` rejection, and the same `DetailPanel` note, as `openAudio`. */
 export function revealInFileManager(_id: string): Promise<void> {
   return unsupportedInBrowser("Revealing the file");
 }
