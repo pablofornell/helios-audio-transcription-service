@@ -361,10 +361,11 @@ func (a *App) Transcript(id, format string) (string, error) {
 // SaveTranscript fetches id's rendered transcript in the given format and
 // writes it to destDir, named after the transcription's own audio
 // filename (stripped of its original extension, sanitised via
-// sanitizeTitle, and given format's own extension instead), returning the
-// real path written. destDir must already exist; the frontend is expected
-// to have obtained it from the user (e.g. via ChooseSaveDirectory), not to
-// have invented it. It never silently overwrites an existing file at the
+// sanitizeTitle, and suffixed with -transcription and the format's own
+// extension), returning the real path written. destDir must already exist;
+// the frontend is expected to have obtained it from the user (e.g. via
+// ChooseSaveDirectory), not to have invented it. It never silently
+// overwrites an existing file at the
 // destination name — see writeUniqueFile.
 func (a *App) SaveTranscript(id, format, destDir string) (string, error) {
 	f, err := transcript.ParseFormat(format)
@@ -383,6 +384,6 @@ func (a *App) SaveTranscript(id, format, destDir string) (string, error) {
 	}
 
 	stem := sanitizeTitle(stripExt(t.Audio.Filename))
-	name := stem + "." + string(f)
+	name := stem + "-transcription." + string(f)
 	return writeUniqueFile(destDir, name, bytes.NewReader(body))
 }

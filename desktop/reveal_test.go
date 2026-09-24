@@ -279,7 +279,7 @@ func TestApp_SaveTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SaveTranscript: %v", err)
 	}
-	wantName := "My Interview.srt"
+	wantName := "My Interview-transcription.srt"
 	if filepath.Base(path) != wantName {
 		t.Errorf("SaveTranscript wrote %q, want basename %q", path, wantName)
 	}

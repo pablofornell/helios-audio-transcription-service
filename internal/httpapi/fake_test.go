@@ -622,6 +622,7 @@ func TestListTranscriptions_FiltersAndBadLimit(t *testing.T) {
 
 func TestGetTranscript_Formats(t *testing.T) {
 	succeeded := sampleTranscription()
+	succeeded.Audio.Filename = "My.interview.mp3"
 
 	cases := []struct {
 		format      string
@@ -657,7 +658,7 @@ func TestGetTranscript_Formats(t *testing.T) {
 			if tc.disposition {
 				disp := rec.Header().Get("Content-Disposition")
 				assert.Contains(t, disp, "attachment")
-				assert.Contains(t, disp, succeeded.ID)
+				assert.Contains(t, disp, `filename="My.interview-transcription.`+tc.format+`"`)
 			} else {
 				assert.Empty(t, rec.Header().Get("Content-Disposition"))
 			}
@@ -703,6 +704,7 @@ func TestGetTranscript_UnknownFormatIsBadRequest(t *testing.T) {
 // rejected -- see parseDownloadQuery's own doc for why.
 func TestGetTranscript_DownloadQueryParam(t *testing.T) {
 	succeeded := sampleTranscription()
+	succeeded.Audio.Filename = "My interview.mp3"
 
 	cases := []struct {
 		name        string
@@ -739,7 +741,7 @@ func TestGetTranscript_DownloadQueryParam(t *testing.T) {
 			disp := rec.Header().Get("Content-Disposition")
 			if tc.disposition {
 				assert.Contains(t, disp, "attachment")
-				assert.Contains(t, disp, succeeded.ID+"."+tc.format)
+				assert.Contains(t, disp, `filename="My interview-transcription.`+tc.format+`"`)
 			} else {
 				assert.Empty(t, disp)
 			}

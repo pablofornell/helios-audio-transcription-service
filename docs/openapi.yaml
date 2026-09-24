@@ -43,6 +43,30 @@ tags:
   - name: operations
 
 paths:
+  /storage:
+    get:
+      tags: [operations]
+      operationId: getStorage
+      summary: Available bytes on the server volume holding uploaded audio.
+      responses:
+        "200":
+          description: Current filesystem space available to the service.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [freeBytes]
+                properties:
+                  freeBytes:
+                    type: integer
+                    format: int64
+                    minimum: 0
+        "500":
+          description: Storage space could not be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /transcriptions:
     post:
       tags: [transcriptions]
@@ -318,7 +342,7 @@ paths:
           in: query
           description: >
             Opt-in only: "1" or "true" force a
-            `Content-Disposition: attachment; filename="<id>.<format>"` header on a
+            `Content-Disposition: attachment; filename="<audio stem>-transcription.<format>"` header on a
             json response, which otherwise never carries one (see the 200 response
             below). Any other value, including an unrecognised one, is treated the
             same as omitting the parameter entirely. Has no effect on txt/srt/vtt,
@@ -329,7 +353,7 @@ paths:
         "200":
           description: >
             The transcript in the requested format. txt/srt/vtt responses always carry
-            a `Content-Disposition: attachment; filename="<id>.<format>"` header; json
+            a `Content-Disposition: attachment; filename="<audio stem>-transcription.<format>"` header; json
             does too, but only when `?download=1` (or `download=true`) was given --
             otherwise it does not.
           content:

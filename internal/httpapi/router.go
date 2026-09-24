@@ -64,6 +64,9 @@ type RouterDeps struct {
 	// Service is the single business-logic implementation every handler
 	// calls into. No handler may do anything Service doesn't already do.
 	Service Service
+	// Storage is the same store used for uploaded audio. Its free-space
+	// reading refers to the server's storage volume, not the caller's disk.
+	Storage interface{ FreeBytes() (uint64, error) }
 	// Health aggregates every registered dependency checker for /readyz.
 	// Must not be nil.
 	Health *observability.Registry
@@ -155,6 +158,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 
 	h := &handlers{
 		service:            deps.Service,
+		storage:            deps.Storage,
 		health:             deps.Health,
 		maxUploadBytes:     deps.MaxUploadBytes,
 		uploadWriteTimeout: deps.RouteTimeout,
@@ -205,6 +209,7 @@ func mountAPI(r chi.Router, h *handlers, routeTimeout time.Duration) {
 
 			bounded.Post("/transcriptions", h.submitTranscription)
 			bounded.Get("/transcriptions", h.listTranscriptions)
+			bounded.Get("/storage", h.getStorage)
 			bounded.Get("/transcriptions/{id}", h.getTranscription)
 			bounded.Delete("/transcriptions/{id}", h.deleteTranscription)
 			bounded.Post("/transcriptions/{id}/cancel", h.cancelTranscription)

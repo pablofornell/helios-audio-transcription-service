@@ -363,6 +363,10 @@ type remoteClient struct {
 
 var _ transcriptionAPI = (*remoteClient)(nil)
 
+func (r *remoteClient) FreeStorageBytes(ctx context.Context) (uint64, error) {
+	return r.current().FreeStorageBytes(ctx)
+}
+
 // newRemoteClient returns a remoteClient initially pointed at baseURL.
 func newRemoteClient(baseURL string) *remoteClient {
 	return &remoteClient{client: httpclient.New(httpclient.Config{BaseURL: baseURL})}

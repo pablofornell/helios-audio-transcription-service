@@ -1,16 +1,39 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 /*
- * Only `useTranscriptions` needs a double — Sidebar's active/queued counts
- * read from it, but this file's one guard doesn't care about their values.
+ * Sidebar's list and storage requests are mocked at the adapter boundary.
  */
+const freeStorageBytes = vi.hoisted(() => vi.fn());
 vi.mock("../lib", async () => {
   const actual = await vi.importActual<typeof import("../lib")>("../lib");
   return {
     ...actual,
     useTranscriptions: () => ({ transcriptions: [], loading: false }),
+    freeStorageBytes,
   };
+});
+
+it("shows server free space and an unavailable state after a read failure", async () => {
+  freeStorageBytes.mockResolvedValueOnce(10 * 1024 ** 3).mockRejectedValueOnce(new Error("offline"));
+  const health = { ok: true, checks: { storage: { ok: true, detail: "ok" } } };
+  const view = render(<Sidebar screen="transcribe" onNavigate={vi.fn()} collapsed={false} health={health} />);
+  await waitFor(() => expect(screen.getByText("10 GB free")).toBeInTheDocument());
+  view.rerender(<Sidebar screen="transcribe" onNavigate={vi.fn()} collapsed={false} health={{ ...health }} />);
+  await waitFor(() => expect(screen.getByText("Unavailable")).toBeInTheDocument());
+});
+
+it("lets keyboard users inspect server space in the collapsed sidebar", async () => {
+  freeStorageBytes.mockResolvedValue(5 * 1024 ** 3);
+  render(<Sidebar screen="transcribe" onNavigate={vi.fn()} collapsed health={{ ok: true, checks: {} }} />);
+  const storage = await screen.findByRole("status", { name: "Server storage: 5 GB free" });
+  const user = userEvent.setup();
+  await user.tab();
+  await user.tab();
+  await user.tab();
+  expect(storage).toHaveFocus();
+  await waitFor(() => expect(screen.getByRole("tooltip")).toHaveTextContent("Server storage: 5 GB free"));
 });
 
 import { Sidebar } from "./Sidebar";

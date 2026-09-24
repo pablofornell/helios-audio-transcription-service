@@ -19,6 +19,7 @@ import (
 // rather than importing httpclient.Client's methods directly is what lets
 // app_test.go and reveal_test.go exercise App without a running server.
 type transcriptionAPI interface {
+	FreeStorageBytes(ctx context.Context) (uint64, error)
 	Submit(ctx context.Context, req httpclient.SubmitRequest) (*domain.Transcription, error)
 	Get(ctx context.Context, id string) (*domain.Transcription, error)
 	List(ctx context.Context, f domain.ListFilter) (domain.Page, error)

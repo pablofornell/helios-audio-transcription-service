@@ -112,6 +112,37 @@
   border-top: 1px solid var(--border-subtle);
 }
 
+.storageSpace {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: var(--space-2);
+}
+
+.storageHeading {
+  color: var(--text-tertiary);
+  font-size: var(--fs-100);
+}
+
+.storageValue {
+  color: var(--text-secondary);
+  font-size: var(--fs-200);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.storageCompact {
+  display: block;
+  color: var(--text-secondary);
+  text-align: center;
+  margin-bottom: var(--space-2);
+}
+
+.storageCompact:focus-visible {
+  outline: var(--ring-w) solid var(--ring-color);
+  outline-offset: var(--ring-offset);
+}
+
 .storageWarning {
   display: block;
   font-size: var(--fs-100);

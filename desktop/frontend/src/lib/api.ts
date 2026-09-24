@@ -78,12 +78,17 @@ export function health(): Promise<HealthReport> {
   return impl().health();
 }
 
+/** Available bytes on the connected server's audio storage volume. */
+export function freeStorageBytes(): Promise<number> {
+  return impl().freeStorageBytes();
+}
+
 /** Fetches the rendered transcript in one of four formats (txt/srt/vtt/json) as text. Only legal once `status: "succeeded"`. See `app.App.Transcript`. */
 export function transcript(id: string, format: TranscriptFormat): Promise<string> {
   return impl().transcript(id, format);
 }
 
-/** Writes `<destDir>/<name>.<format>` and returns the path written. `destDir` must already exist — obtain it from the user (e.g. `chooseSaveDirectory`), do not invent one. See `app.App.SaveTranscript`. */
+/** Writes `<destDir>/<audio stem>-transcription.<format>` and returns the path written. `destDir` must already exist — obtain it from the user (e.g. `chooseSaveDirectory`), do not invent one. See `app.App.SaveTranscript`. */
 export function saveTranscript(id: string, format: TranscriptFormat, destDir: string): Promise<string> {
   return impl().saveTranscript(id, format, destDir);
 }

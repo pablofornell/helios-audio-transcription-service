@@ -15,18 +15,26 @@ import (
 // value — when a test reaches a method it never configured, so an
 // unexpectedly-exercised call says so loudly instead of masking a bug.
 type fakeAPI struct {
-	submitFunc        func(ctx context.Context, req httpclient.SubmitRequest) (*domain.Transcription, error)
-	getFunc           func(ctx context.Context, id string) (*domain.Transcription, error)
-	listFunc          func(ctx context.Context, f domain.ListFilter) (domain.Page, error)
-	deleteFunc        func(ctx context.Context, id string) error
-	cancelFunc        func(ctx context.Context, id string) (*domain.Transcription, error)
-	retryFunc         func(ctx context.Context, id string) (*domain.Transcription, error)
-	getTranscriptFunc func(ctx context.Context, id string, format transcript.Format) ([]byte, error)
-	openAudioFunc     func(ctx context.Context, id string) (io.ReadSeekCloser, httpclient.AudioInfo, error)
-	healthFunc        func(ctx context.Context) (HealthReport, error)
+	freeStorageBytesFunc func(ctx context.Context) (uint64, error)
+	submitFunc           func(ctx context.Context, req httpclient.SubmitRequest) (*domain.Transcription, error)
+	getFunc              func(ctx context.Context, id string) (*domain.Transcription, error)
+	listFunc             func(ctx context.Context, f domain.ListFilter) (domain.Page, error)
+	deleteFunc           func(ctx context.Context, id string) error
+	cancelFunc           func(ctx context.Context, id string) (*domain.Transcription, error)
+	retryFunc            func(ctx context.Context, id string) (*domain.Transcription, error)
+	getTranscriptFunc    func(ctx context.Context, id string, format transcript.Format) ([]byte, error)
+	openAudioFunc        func(ctx context.Context, id string) (io.ReadSeekCloser, httpclient.AudioInfo, error)
+	healthFunc           func(ctx context.Context) (HealthReport, error)
 }
 
 var _ transcriptionAPI = (*fakeAPI)(nil)
+
+func (f *fakeAPI) FreeStorageBytes(ctx context.Context) (uint64, error) {
+	if f.freeStorageBytesFunc == nil {
+		panic("fakeAPI: FreeStorageBytes not configured")
+	}
+	return f.freeStorageBytesFunc(ctx)
+}
 
 func (f *fakeAPI) Submit(ctx context.Context, req httpclient.SubmitRequest) (*domain.Transcription, error) {
 	if f.submitFunc == nil {

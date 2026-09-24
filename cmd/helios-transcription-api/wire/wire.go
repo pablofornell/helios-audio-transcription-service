@@ -325,6 +325,7 @@ func Build(ctx context.Context, cfg *config.Config, opts ...Option) (stack *Stac
 
 	s.Router = httpapi.NewRouter(httpapi.RouterDeps{
 		Service:        s.Service,
+		Storage:        s.Store,
 		Health:         s.HealthRegistry,
 		Metrics:        s.Metrics,
 		Logger:         s.Logger,

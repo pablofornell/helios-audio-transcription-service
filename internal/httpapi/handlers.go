@@ -10,6 +10,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -29,6 +30,7 @@ import (
 // anything else -- business logic lives in Service, not here.
 type handlers struct {
 	service        Service
+	storage        interface{ FreeBytes() (uint64, error) }
 	health         *observability.Registry
 	maxUploadBytes int64
 	// uploadWriteTimeout is how long submitTranscription extends the
@@ -431,10 +433,36 @@ func (h *handlers) getTranscript(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", format.ContentType())
 	if format != transcript.FormatJSON || download {
-		w.Header().Set("Content-Disposition", contentDispositionAttachment(id+"."+string(format)))
+		w.Header().Set("Content-Disposition", contentDispositionAttachment(transcriptDownloadName(t.Audio.Filename, format)))
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
+}
+
+// transcriptDownloadName keeps the uploaded audio's base name while replacing
+// its extension with the requested transcript format. Leave room for the
+// suffix under common 255-byte filesystem component limits and avoid a
+// leading dot, which would make the download hidden on POSIX systems.
+func transcriptDownloadName(filename string, format transcript.Format) string {
+	base := path.Base(strings.ReplaceAll(filename, `\`, "/"))
+	if ext := filepath.Ext(base); ext != base {
+		base = strings.TrimSuffix(base, ext)
+	}
+	base = strings.Trim(base, ". ")
+	if len(base) > 200 {
+		cut := 0
+		for i := range base {
+			if i > 200 {
+				break
+			}
+			cut = i
+		}
+		base = strings.TrimRight(base[:cut], ". ")
+	}
+	if base == "" {
+		base = "transcription"
+	}
+	return base + "-transcription." + string(format)
 }
 
 // parseDownloadQuery interprets the `download` query parameter's raw

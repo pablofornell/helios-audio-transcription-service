@@ -14,6 +14,8 @@ export function DefaultSaveDirectory():Promise<string>;
 
 export function Delete(arg1:string):Promise<void>;
 
+export function FreeStorageBytes():Promise<number>;
+
 export function Get(arg1:string):Promise<main.TranscriptionDTO>;
 
 export function GetServerSettings():Promise<main.ServerSettingsDTO>;

@@ -215,3 +215,8 @@ func (a *App) Health() (HealthReportDTO, error) {
 	}
 	return healthReportDTOFromReport(report), nil
 }
+
+// FreeStorageBytes reports available space on the target server's audio store.
+func (a *App) FreeStorageBytes() (uint64, error) {
+	return a.api.FreeStorageBytes(a.runtimeCtx())
+}

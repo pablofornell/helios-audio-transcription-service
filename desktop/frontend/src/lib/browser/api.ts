@@ -200,6 +200,12 @@ export function health(): Promise<HealthReport> {
   return fetchHealthReport(`${apiBase()}/readyz`);
 }
 
+/** Available bytes on the server volume that stores uploaded audio. */
+export async function freeStorageBytes(): Promise<number> {
+  const response = await requestJSON<{ freeBytes: number }>(apiPath("/storage"), undefined, [200]);
+  return response.freeBytes;
+}
+
 /** Fetches the rendered transcript in one of four formats. See `app.App.Transcript` / `GET /api/v1/transcriptions/{id}/transcript`. Works from a plain browser tab — it is just a GET request. */
 export function transcript(id: string, format: TranscriptFormat): Promise<string> {
   return requestText(apiPath(`/transcriptions/${id}/transcript?format=${format}`), undefined, [200]);

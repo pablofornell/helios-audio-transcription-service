@@ -1,10 +1,30 @@
 package httpapi
 
 import (
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/pablofornell/helios-audio-transcription-service/internal/transcript"
 )
+
+func TestTranscriptDownloadName_SafeStem(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "interview-transcription.srt", transcriptDownloadName(".interview.mp3", transcript.FormatSRT))
+	require.Equal(t, "hidden-transcription.txt", transcriptDownloadName(".hidden", transcript.FormatText))
+
+	name := transcriptDownloadName(strings.Repeat("a", 251)+".mp3", transcript.FormatJSON)
+	require.Equal(t, strings.Repeat("a", 200)+"-transcription.json", name)
+	require.LessOrEqual(t, len(name), 255)
+
+	unicodeName := transcriptDownloadName(strings.Repeat("é", 101)+".mp3", transcript.FormatVTT)
+	require.True(t, utf8.ValidString(unicodeName))
+	require.LessOrEqual(t, len(unicodeName), 255)
+	require.True(t, strings.HasSuffix(unicodeName, "-transcription.vtt"))
+}
 
 // TestContentDispositionAttachment_NonASCIIFilename pins RFC 6266 handling.
 // HTTP header values are ISO-8859-1, so writing a non-ASCII rune straight

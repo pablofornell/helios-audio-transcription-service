@@ -29,7 +29,7 @@ const FORMAT_OPTIONS: { value: TranscriptFormat; label: string }[] = [
 /**
  * Desktop (`hasWailsRuntime()`): collects a destination folder and writes
  * the rendered transcript there — `SaveTranscript` (see
- * `app.App.SaveTranscript`) writes `<destDir>/<name>.<format>` and returns
+ * `app.App.SaveTranscript`) writes `<destDir>/<audio stem>-transcription.<format>` and returns
  * the path actually written. `destDir` must already exist; this dialog
  * does not create it. It pre-fills the field with `defaultSaveDirectory`'s
  * answer (the user's system downloads folder) whenever one resolves, and

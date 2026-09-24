@@ -104,12 +104,17 @@ export function health(): Promise<HealthReport> {
   return call(() => Bound.Health()) as unknown as Promise<HealthReport>;
 }
 
+/** Available bytes on the connected server's audio storage volume. */
+export function freeStorageBytes(): Promise<number> {
+  return call(() => Bound.FreeStorageBytes());
+}
+
 /** Fetches the rendered transcript in one of four formats. See `app.App.Transcript`. */
 export function transcript(id: string, format: TranscriptFormat): Promise<string> {
   return call(() => Bound.Transcript(id, format));
 }
 
-/** Writes `<destDir>/<name>.<format>` and returns the path written. See `app.App.SaveTranscript`. */
+/** Writes `<destDir>/<audio stem>-transcription.<format>` and returns the path written. See `app.App.SaveTranscript`. */
 export function saveTranscript(id: string, format: TranscriptFormat, destDir: string): Promise<string> {
   return call(() => Bound.SaveTranscript(id, format, destDir));
 }

@@ -26,6 +26,10 @@ export function Delete(arg1) {
   return window['go']['main']['App']['Delete'](arg1);
 }
 
+export function FreeStorageBytes() {
+  return window['go']['main']['App']['FreeStorageBytes']();
+}
+
 export function Get(arg1) {
   return window['go']['main']['App']['Get'](arg1);
 }
