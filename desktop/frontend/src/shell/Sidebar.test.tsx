@@ -19,7 +19,7 @@ it("shows server free space and an unavailable state after a read failure", asyn
   freeStorageBytes.mockResolvedValueOnce(10 * 1024 ** 3).mockRejectedValueOnce(new Error("offline"));
   const health = { ok: true, checks: { storage: { ok: true, detail: "ok" } } };
   const view = render(<Sidebar screen="transcribe" onNavigate={vi.fn()} collapsed={false} health={health} />);
-  await waitFor(() => expect(screen.getByText("10 GB free")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText("10.7 GB free")).toBeInTheDocument());
   view.rerender(<Sidebar screen="transcribe" onNavigate={vi.fn()} collapsed={false} health={{ ...health }} />);
   await waitFor(() => expect(screen.getByText("Unavailable")).toBeInTheDocument());
 });
@@ -27,13 +27,13 @@ it("shows server free space and an unavailable state after a read failure", asyn
 it("lets keyboard users inspect server space in the collapsed sidebar", async () => {
   freeStorageBytes.mockResolvedValue(5 * 1024 ** 3);
   render(<Sidebar screen="transcribe" onNavigate={vi.fn()} collapsed health={{ ok: true, checks: {} }} />);
-  const storage = await screen.findByRole("status", { name: "Server storage: 5 GB free" });
+  const storage = await screen.findByRole("region", { name: "Server storage: 5.4 GB free" });
   const user = userEvent.setup();
   await user.tab();
   await user.tab();
   await user.tab();
   expect(storage).toHaveFocus();
-  await waitFor(() => expect(screen.getByRole("tooltip")).toHaveTextContent("Server storage: 5 GB free"));
+  await waitFor(() => expect(screen.getByRole("tooltip")).toHaveTextContent("Server storage: 5.4 GB free"));
 });
 
 import { Sidebar } from "./Sidebar";

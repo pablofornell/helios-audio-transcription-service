@@ -792,6 +792,16 @@ components:
         detail:
           type: string
           description: Short human-readable diagnostic text, present whether ok is true or false.
+        freeBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Available bytes on the storage volume; omitted when unavailable.
+        totalBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Total bytes on the storage volume; omitted when unavailable.
 
     ReadyReport:
       type: object

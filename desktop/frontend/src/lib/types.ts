@@ -206,6 +206,8 @@ export interface MediaLocation {
 }
 
 export interface CheckResult {
+  freeBytes?: number;
+  totalBytes?: number;
   ok: boolean;
   detail: string;
 }

@@ -26,7 +26,7 @@ func TestReadyz_OK(t *testing.T) {
 		writeJSON(t, w, http.StatusOK, map[string]any{
 			"ok": true,
 			"checks": map[string]any{
-				"database": map[string]any{"ok": true, "detail": "connected"},
+				"database": map[string]any{"ok": true, "detail": "connected", "freeBytes": int64(20), "totalBytes": int64(100)},
 			},
 		})
 	}))
@@ -36,6 +36,10 @@ func TestReadyz_OK(t *testing.T) {
 	assert.True(t, report.OK)
 	assert.True(t, report.Checks["database"].OK)
 	assert.Equal(t, "connected", report.Checks["database"].Detail)
+	require.NotNil(t, report.Checks["database"].FreeBytes)
+	assert.Equal(t, int64(20), *report.Checks["database"].FreeBytes)
+	require.NotNil(t, report.Checks["database"].TotalBytes)
+	assert.Equal(t, int64(100), *report.Checks["database"].TotalBytes)
 }
 
 func TestReadyz_NotReady_StillDecodesReport(t *testing.T) {

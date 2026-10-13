@@ -1,0 +1,12 @@
+.meter { display: grid; gap: 6px; min-width: 0; color: var(--text-tertiary); }
+.label { font-size: 11px; }
+.value { font-size: 11px; line-height: 1.4; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.track { height: 5px; overflow: hidden; border-radius: 3px; background: var(--bg-hover); }
+.fill { display: block; height: 100%; background: currentColor; }
+.healthy { color: var(--st-succeeded); }
+.warning { color: var(--st-retrying, #a66c12); }
+.critical { color: var(--st-failed); }
+.unknown .track { border: 1px solid var(--text-tertiary); opacity: .35; }
+.collapsed { width: 100%; text-align: center; }
+.collapsed .value { font-size: 9px; }
+.collapsed:focus-visible { outline: 2px solid var(--st-running); outline-offset: 4px; }

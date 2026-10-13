@@ -247,8 +247,10 @@ type MediaLocationDTO struct {
 
 // CheckResultDTO mirrors httpapi's checkResultDTO / observability.CheckResult.
 type CheckResultDTO struct {
-	OK     bool   `json:"ok"`
-	Detail string `json:"detail"`
+	OK         bool   `json:"ok"`
+	Detail     string `json:"detail"`
+	FreeBytes  *int64 `json:"freeBytes,omitempty"`
+	TotalBytes *int64 `json:"totalBytes,omitempty"`
 }
 
 // HealthReportDTO mirrors httpapi's readyReportDTO / observability.Report.
@@ -260,7 +262,7 @@ type HealthReportDTO struct {
 func healthReportDTOFromReport(r HealthReport) HealthReportDTO {
 	checks := make(map[string]CheckResultDTO, len(r.Checks))
 	for name, c := range r.Checks {
-		checks[name] = CheckResultDTO{OK: c.OK, Detail: c.Detail}
+		checks[name] = CheckResultDTO{OK: c.OK, Detail: c.Detail, FreeBytes: c.FreeBytes, TotalBytes: c.TotalBytes}
 	}
 	return HealthReportDTO{OK: r.OK, Checks: checks}
 }

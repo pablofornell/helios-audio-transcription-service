@@ -24,8 +24,10 @@ type Checker interface {
 
 // CheckResult is one checker's outcome as reported in a Report.
 type CheckResult struct {
-	OK     bool
-	Detail string
+	OK         bool
+	Detail     string
+	FreeBytes  *int64
+	TotalBytes *int64
 }
 
 // Report is the aggregate result of running every registered Checker.
@@ -267,6 +269,15 @@ func (r *Registry) execute(checker Checker, st *checkState, run *inFlightCheck) 
 		defer func() {
 			if p := recover(); p != nil {
 				result = CheckResult{OK: false, Detail: fmt.Sprintf("panic: %v", p)}
+			}
+		}()
+		defer func() {
+			if provider, ok := checker.(interface {
+				StorageCapacity(context.Context) (int64, int64, error)
+			}); ok {
+				if free, total, err := provider.StorageCapacity(runCtx); err == nil {
+					result.FreeBytes, result.TotalBytes = &free, &total
+				}
 			}
 		}()
 		if err := checker.Check(runCtx); err != nil {

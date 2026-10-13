@@ -216,8 +216,10 @@ type errorResponseDTO struct {
 
 // checkResultDTO mirrors observability.CheckResult.
 type checkResultDTO struct {
-	OK     bool   `json:"ok"`
-	Detail string `json:"detail,omitempty"`
+	OK         bool   `json:"ok"`
+	Detail     string `json:"detail,omitempty"`
+	FreeBytes  *int64 `json:"freeBytes,omitempty"`
+	TotalBytes *int64 `json:"totalBytes,omitempty"`
 }
 
 // readyReportDTO mirrors observability.Report, the /readyz response body.

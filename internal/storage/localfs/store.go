@@ -434,6 +434,18 @@ func (s *Store) RemoveDir(ctx context.Context, relDir string) error {
 	return nil
 }
 
+// StorageCapacity reports available and total bytes on the store volume.
+func (s *Store) StorageCapacity(ctx context.Context) (int64, int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, 0, err
+	}
+	var st unix.Statfs_t
+	if err := unix.Statfs(s.root, &st); err != nil {
+		return 0, 0, fmt.Errorf("localfs: statfs %q: %w", s.root, err)
+	}
+	return int64(st.Bavail) * int64(st.Bsize), int64(st.Blocks) * int64(st.Bsize), nil
+}
+
 // FreeBytes returns the number of bytes currently free on the store's
 // volume, via statfs(2).
 func (s *Store) FreeBytes() (uint64, error) {

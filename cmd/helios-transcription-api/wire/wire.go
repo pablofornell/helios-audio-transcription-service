@@ -404,6 +404,10 @@ type storageChecker struct {
 	minFreeBytes uint64
 }
 
+func (c storageChecker) StorageCapacity(ctx context.Context) (int64, int64, error) {
+	return c.store.StorageCapacity(ctx)
+}
+
 func (storageChecker) Name() string { return "storage" }
 
 // healthProbePath is the store-relative path storageChecker.Check writes
