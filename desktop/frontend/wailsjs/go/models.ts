@@ -27,6 +27,8 @@ export namespace main {
 	export class CheckResultDTO {
 	    ok: boolean;
 	    detail: string;
+	    freeBytes?: number;
+	    totalBytes?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new CheckResultDTO(source);
@@ -36,6 +38,8 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ok = source["ok"];
 	        this.detail = source["detail"];
+	        this.freeBytes = source["freeBytes"];
+	        this.totalBytes = source["totalBytes"];
 	    }
 	}
 	export class ErrorDTO {

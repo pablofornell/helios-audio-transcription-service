@@ -53,7 +53,7 @@ func (h *handlers) readyz(w http.ResponseWriter, r *http.Request) {
 func readyReportFromObservability(r observability.Report) readyReportDTO {
 	checks := make(map[string]checkResultDTO, len(r.Checks))
 	for name, c := range r.Checks {
-		checks[name] = checkResultDTO{OK: c.OK, Detail: c.Detail}
+		checks[name] = checkResultDTO{OK: c.OK, Detail: c.Detail, FreeBytes: c.FreeBytes, TotalBytes: c.TotalBytes}
 	}
 	return readyReportDTO{OK: r.OK, Checks: checks}
 }

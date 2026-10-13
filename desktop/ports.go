@@ -49,8 +49,10 @@ type transcriptionAPI interface {
 // type, the same reason app.go's other methods never hand a domain type
 // straight to the frontend either.
 type CheckResult struct {
-	OK     bool
-	Detail string
+	OK         bool
+	Detail     string
+	FreeBytes  *int64 `json:"freeBytes,omitempty"`
+	TotalBytes *int64 `json:"totalBytes,omitempty"`
 }
 
 // HealthReport is transcriptionAPI.Health's result: the target server's
@@ -91,7 +93,7 @@ func healthReportFromTransportErr(err error) HealthReport {
 func healthReportFromReady(r httpclient.ReadyReport) HealthReport {
 	checks := make(map[string]CheckResult, len(r.Checks))
 	for name, c := range r.Checks {
-		checks[name] = CheckResult{OK: c.OK, Detail: c.Detail}
+		checks[name] = CheckResult{OK: c.OK, Detail: c.Detail, FreeBytes: c.FreeBytes, TotalBytes: c.TotalBytes}
 	}
 	return HealthReport{OK: r.OK, Checks: checks}
 }

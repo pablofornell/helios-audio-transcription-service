@@ -15,7 +15,9 @@ type CheckResult struct {
 	OK bool `json:"ok"`
 	// Detail is a short human-readable diagnostic, present whether OK is
 	// true or false.
-	Detail string `json:"detail,omitempty"`
+	Detail     string `json:"detail,omitempty"`
+	FreeBytes  *int64 `json:"freeBytes,omitempty"`
+	TotalBytes *int64 `json:"totalBytes,omitempty"`
 }
 
 // ReadyReport is GET /readyz's response body: every registered dependency

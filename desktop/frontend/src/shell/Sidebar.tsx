@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { freeStorageBytes, useServerSettingsVersion, useTranscriptions, type HealthReport } from "../lib";
 import { Tooltip } from "../components";
+import { StorageMeter } from "../components/StorageMeter";
 import styles from "./Sidebar.module.css";
 
 export type ScreenId = "transcribe" | "library";
@@ -45,9 +46,6 @@ export function Sidebar({ screen, onNavigate, collapsed, health }: SidebarProps)
     return () => { cancelled = true; };
   }, [health, serverVersion]);
 
-  const storageLabel = freeBytes === null
-    ? "Server storage: unavailable"
-    : `Server storage: ${formatStorageBytes(freeBytes)} free`;
 
   return (
     <nav className={[styles.sidebar, collapsed ? styles.collapsed : ""].filter(Boolean).join(" ")} aria-label="Primary">
@@ -75,32 +73,11 @@ export function Sidebar({ screen, onNavigate, collapsed, health }: SidebarProps)
         />
       </ul>
       <div className={styles.footer}>
-        {collapsed ? (
-          <Tooltip content={storageLabel} side="right">
-            <span className={styles.storageCompact} role="status" tabIndex={0} aria-label={storageLabel}>◉</span>
-          </Tooltip>
-        ) : (
-          <div className={styles.storageSpace} aria-live="polite">
-            <span className={styles.storageHeading}>Server storage</span>
-            <strong className={styles.storageValue}>{freeBytes === null ? "Unavailable" : `${formatStorageBytes(freeBytes)} free`}</strong>
-          </div>
-        )}
-        {storageWarning ? (
-          <Tooltip content={storageCheck?.detail ?? "Storage check failed"}>
-            <span className={styles.storageWarning}>{collapsed ? "!" : "Low disk space"}</span>
-          </Tooltip>
-        ) : null}
+        <StorageMeter collapsed={collapsed} freeBytes={health?.checks.connection?.ok === false ? undefined : storageCheck?.freeBytes ?? freeBytes} totalBytes={health?.checks.connection?.ok === false ? undefined : storageCheck?.totalBytes} />
+        {storageWarning && <span className={styles.storageWarning} title={storageCheck?.detail}>Storage check failed</span>}
       </div>
     </nav>
   );
-}
-
-function formatStorageBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return "Unavailable";
-  if (bytes < 1024) return `${Math.round(bytes)} B`;
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const power = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), 4);
-  return `${(bytes / 1024 ** power).toLocaleString("en-US", { maximumFractionDigits: 1 })} ${units[power]}`;
 }
 
 interface SidebarItemProps {
