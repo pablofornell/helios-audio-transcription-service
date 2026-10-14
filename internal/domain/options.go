@@ -35,7 +35,7 @@ var modelNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 // for BeamSize (and, via Model/Language trimming, whitespace-only strings)
 // are filled in by Normalize before Validate is called — see Normalize.
 type Options struct {
-	// Model is the whisper model name, e.g. "base", "large-v3". Empty means
+	// Model is the whisper model name, "large-v3-turbo-q5_0". Empty means
 	// the configured default model.
 	Model string `json:"model"`
 	// Language is an ISO-639-1 code. Empty or "auto" means auto-detect.

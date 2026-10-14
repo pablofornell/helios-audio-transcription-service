@@ -257,8 +257,8 @@ func minimalValidConfig() config.Config {
 		},
 		Transcriber: config.TranscriberConfig{
 			Kind:          "fake",
-			DefaultModel:  "base",
-			AllowedModels: []string{"base"},
+			DefaultModel:  "large-v3-turbo-q5_0",
+			AllowedModels: []string{"large-v3-turbo-q5_0"},
 			Timeout:       30 * time.Minute,
 		},
 		Audio: config.AudioConfig{

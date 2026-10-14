@@ -3,9 +3,9 @@ import type { Transcription, Status } from '../../src/lib/types';
 
 function item(id: string, status: Status = 'succeeded', createdAt = '2026-10-13T10:00:00Z', completedAt = '2026-10-14T10:00:00Z'): Transcription {
   return {
-    id, status, options: { model: 'base', language: 'en', task: 'transcribe', wordTimestamps: false, initialPrompt: '', beamSize: 5, temperature: 0 },
+    id, status, options: { model: 'large-v3-turbo-q5_0', language: 'en', task: 'transcribe', wordTimestamps: false, initialPrompt: '', beamSize: 5, temperature: 0 },
     audio: { filename: `${id}.wav`, mediaType: 'audio/wav', sizeBytes: 1000, durationSeconds: 2, sampleRateHz: 16000, channels: 1, codec: 'pcm_s16le' },
-    result: status === 'succeeded' ? { text: `Transcript for ${id}`, language: 'en', durationSeconds: 2, model: 'base', task: 'transcribe', segments: [{ id: 0, start: 0, end: 2, text: `Transcript for ${id}` }] } : null,
+    result: status === 'succeeded' ? { text: `Transcript for ${id}`, language: 'en', durationSeconds: 2, model: 'large-v3-turbo-q5_0', task: 'transcribe', segments: [{ id: 0, start: 0, end: 2, text: `Transcript for ${id}` }] } : null,
     attempts: 1, maxAttempts: 3, createdAt, updatedAt: new Date().toISOString(), startedAt: status === 'running' ? new Date(Date.now() - 10000).toISOString() : undefined,
     completedAt: status === 'pending' || status === 'running' ? undefined : completedAt,
   };

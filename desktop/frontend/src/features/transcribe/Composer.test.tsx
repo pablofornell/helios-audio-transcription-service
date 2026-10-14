@@ -11,6 +11,7 @@ vi.mock("../../lib", async (original) => ({
 }));
 vi.mock("../../lib/runtime", () => ({ hasWailsRuntime: native.available }));
 beforeEach(() => {
+  localStorage.clear();
   native.choose.mockReset();
   native.available.mockReturnValue(false);
 });
@@ -81,5 +82,22 @@ describe("native file chooser lifecycle", () => {
     expect(native.choose).toHaveBeenCalledTimes(1);
     await act(async () => { resolve("/current/audio.wav"); });
     expect(submit).toHaveBeenCalledWith({ kind: "path", path: "/current/audio.wav", name: "audio.wav" }, expect.any(Object));
+  });
+});
+
+
+describe("supported transcription model", () => {
+  it("offers only the server default and quantized turbo model", () => {
+    render(<Composer variant="expanded" submit={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["Server default", "large-v3-turbo-q5_0"]);
+  });
+
+  it("submits with the default after restoring a retired saved model", () => {
+    localStorage.setItem("helios.transcribe.composerOptions", JSON.stringify({ model: "base", language: "en" }));
+    const submit = vi.fn().mockResolvedValue({ ok: true, id: "accepted" });
+    const { container } = render(<Composer variant="collapsed" submit={submit} />);
+    upload(container, "turbo.wav");
+    expect(submit).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ model: "", language: "en" }));
   });
 });

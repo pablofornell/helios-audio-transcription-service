@@ -5,12 +5,8 @@
 #
 #   ./scripts/fetch-models.sh [model ...]
 #
-# With no arguments, it fetches "large-v3" -- HELIOS_TRANSCRIBER_DEFAULT_MODEL's
-# own default -- so a fresh checkout has something to transcribe with. Any
-# number of model names may be given instead, each one of
-# HELIOS_TRANSCRIBER_ALLOWED_MODELS' default set (tiny, base, small, medium,
-# large-v3) or any other name ggerganov/whisper.cpp publishes a
-# ggml-<model>.bin for.
+# With no arguments, fetch the only supported model: large-v3-turbo-q5_0.
+# Explicit model arguments must use that exact quantized model name.
 set -euo pipefail
 
 # models_dir is relative to this script's own location, not the caller's
@@ -26,8 +22,16 @@ base_url="https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
 
 models=("$@")
 if [ ${#models[@]} -eq 0 ]; then
-	models=("large-v3")
+	models=("large-v3-turbo-q5_0")
 fi
+
+# Reject the whole request before creating files or starting downloads.
+for model in "${models[@]}"; do
+	if [[ "${model}" != "large-v3-turbo-q5_0" ]]; then
+		echo "Unsupported model: ${model}; only large-v3-turbo-q5_0 is supported" >&2
+		exit 2
+	fi
+done
 
 mkdir -p "${models_dir}"
 

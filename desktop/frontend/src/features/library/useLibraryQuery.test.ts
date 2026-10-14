@@ -14,7 +14,7 @@ vi.mock("../../lib", async (importOriginal) => ({
 const row = (id: string, status = "succeeded") => ({
   id,
   status,
-  options: { model: "base", language: "", task: "transcribe", wordTimestamps: false, initialPrompt: "", beamSize: 5, temperature: 0 },
+  options: { model: "large-v3-turbo-q5_0", language: "", task: "transcribe", wordTimestamps: false, initialPrompt: "", beamSize: 5, temperature: 0 },
   audio: { filename: `${id}.wav`, mediaType: "audio/wav", sizeBytes: 1, durationSeconds: 1, sampleRateHz: 16000, channels: 1, codec: "pcm_s16le" },
   attempts: 1,
   maxAttempts: 3,

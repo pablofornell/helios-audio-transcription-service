@@ -20,7 +20,7 @@ func newReq(opts domain.Options) domain.TranscribeRequest {
 
 func TestTranscribe_deterministic(t *testing.T) {
 	tr := New(Config{})
-	req := newReq(domain.Options{Model: "base", Task: domain.TaskTranscribe, WordTimestamps: true})
+	req := newReq(domain.Options{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe, WordTimestamps: true})
 
 	first, err := tr.Transcribe(context.Background(), req)
 	require.NoError(t, err)
@@ -95,9 +95,9 @@ func TestTranscribe_taskHonoured(t *testing.T) {
 
 func TestTranscribe_modelEchoedFromRequest(t *testing.T) {
 	tr := New(Config{})
-	got, err := tr.Transcribe(context.Background(), newReq(domain.Options{Model: "large-v3"}))
+	got, err := tr.Transcribe(context.Background(), newReq(domain.Options{Model: "large-v3-turbo-q5_0"}))
 	require.NoError(t, err)
-	assert.Equal(t, "large-v3", got.Model)
+	assert.Equal(t, "large-v3-turbo-q5_0", got.Model)
 }
 
 func TestTranscribe_languageDefaultsToEnglishWhenAutoDetect(t *testing.T) {

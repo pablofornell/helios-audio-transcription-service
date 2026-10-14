@@ -71,19 +71,19 @@ exit 0
 
 func TestTranscribe_success(t *testing.T) {
 	modelDir := t.TempDir()
-	newModel(t, modelDir, "base")
+	newModel(t, modelDir, "large-v3-turbo-q5_0")
 	bin := writeScript(t, stubThatWritesOutput(sampleOJ))
 
 	tr := New(Config{Binary: bin, ModelDir: modelDir, Timeout: 5 * time.Second})
 	req := domain.TranscribeRequest{
 		AudioPath: newAudioPath(t),
-		Options:   domain.Options{Model: "base", Task: domain.TaskTranscribe, BeamSize: 5},
+		Options:   domain.Options{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe, BeamSize: 5},
 	}
 
 	got, err := tr.Transcribe(context.Background(), req)
 	require.NoError(t, err)
 	assert.Equal(t, "en", got.Language)
-	assert.Equal(t, "base", got.Model)
+	assert.Equal(t, "large-v3-turbo-q5_0", got.Model)
 	assert.Equal(t, domain.TaskTranscribe, got.Task)
 	assert.Equal(t, "Hello there. How are you?", got.Text)
 }
@@ -101,12 +101,12 @@ func TestTranscribe_forwardsGPUConfiguration(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			modelDir := t.TempDir()
-			newModel(t, modelDir, "base")
+			newModel(t, modelDir, "large-v3-turbo-q5_0")
 			argsPath := filepath.Join(t.TempDir(), "args.txt")
 			t.Setenv("WHISPER_TEST_ARGS_PATH", argsPath)
 			script := strings.Replace(stubThatWritesOutput(sampleOJ), "of=\"\"", "printf '%s\\n' \"$@\" > \"$WHISPER_TEST_ARGS_PATH\"\nof=\"\"", 1)
 			tr := New(Config{Binary: writeScript(t, script), ModelDir: modelDir, NoGPU: tt.noGPU, GPUDevice: tt.device, Timeout: 5 * time.Second})
-			req := domain.TranscribeRequest{AudioPath: newAudioPath(t), Options: domain.Options{Model: "base", Task: domain.TaskTranscribe, BeamSize: 5}}
+			req := domain.TranscribeRequest{AudioPath: newAudioPath(t), Options: domain.Options{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe, BeamSize: 5}}
 			_, err := tr.Transcribe(context.Background(), req)
 			require.NoError(t, err)
 			data, err := os.ReadFile(argsPath)
@@ -127,12 +127,12 @@ func TestTranscribe_forwardsGPUConfiguration(t *testing.T) {
 
 func TestTranscribe_perJobTempDirIsCleanedUp(t *testing.T) {
 	modelDir := t.TempDir()
-	newModel(t, modelDir, "base")
+	newModel(t, modelDir, "large-v3-turbo-q5_0")
 	bin := writeScript(t, stubThatWritesOutput(sampleOJ))
 
 	tr := New(Config{Binary: bin, ModelDir: modelDir, Timeout: 5 * time.Second})
 	audioPath := newAudioPath(t)
-	req := domain.TranscribeRequest{AudioPath: audioPath, Options: domain.Options{Model: "base", Task: domain.TaskTranscribe, BeamSize: 5}}
+	req := domain.TranscribeRequest{AudioPath: audioPath, Options: domain.Options{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe, BeamSize: 5}}
 
 	_, err := tr.Transcribe(context.Background(), req)
 	require.NoError(t, err)
@@ -155,13 +155,13 @@ func TestTranscribe_modelMissingFailsBeforeExec(t *testing.T) {
 	bin := writeScript(t, "#!/usr/bin/env bash\necho 'should never run' >&2\nexit 1\n")
 
 	tr := New(Config{Binary: bin, ModelDir: modelDir, Timeout: 5 * time.Second})
-	req := domain.TranscribeRequest{AudioPath: newAudioPath(t), Options: domain.Options{Model: "large-v3", Task: domain.TaskTranscribe, BeamSize: 5}}
+	req := domain.TranscribeRequest{AudioPath: newAudioPath(t), Options: domain.Options{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe, BeamSize: 5}}
 
 	_, err := tr.Transcribe(context.Background(), req)
 	require.Error(t, err)
 	assert.Equal(t, domain.ErrCodeModelUnavailable, domain.CodeOf(err))
 	de := domain.AsError(err)
-	assert.Equal(t, "large-v3", de.Details["model"])
+	assert.Equal(t, "large-v3-turbo-q5_0", de.Details["model"])
 	_, hasPath := de.Details["path"]
 	assert.False(t, hasPath, "model_unavailable must not echo the resolved absolute path back to the caller")
 }
@@ -198,11 +198,11 @@ func TestTranscribe_emptyModelIsRejected(t *testing.T) {
 
 func TestTranscribe_nonZeroExitClassifiesToolFailure(t *testing.T) {
 	modelDir := t.TempDir()
-	newModel(t, modelDir, "base")
+	newModel(t, modelDir, "large-v3-turbo-q5_0")
 	bin := writeScript(t, "#!/usr/bin/env bash\necho 'whisper_init: failed to load model' >&2\nexit 1\n")
 
 	tr := New(Config{Binary: bin, ModelDir: modelDir, Timeout: 5 * time.Second})
-	req := domain.TranscribeRequest{AudioPath: newAudioPath(t), Options: domain.Options{Model: "base", Task: domain.TaskTranscribe, BeamSize: 5}}
+	req := domain.TranscribeRequest{AudioPath: newAudioPath(t), Options: domain.Options{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe, BeamSize: 5}}
 
 	_, err := tr.Transcribe(context.Background(), req)
 	require.Error(t, err)
@@ -213,12 +213,12 @@ func TestTranscribe_nonZeroExitClassifiesToolFailure(t *testing.T) {
 
 func TestTranscribe_missingOutputFileIsToolFailure(t *testing.T) {
 	modelDir := t.TempDir()
-	newModel(t, modelDir, "base")
+	newModel(t, modelDir, "large-v3-turbo-q5_0")
 	// Exits 0 but never writes <outBase>.json.
 	bin := writeScript(t, "#!/usr/bin/env bash\nexit 0\n")
 
 	tr := New(Config{Binary: bin, ModelDir: modelDir, Timeout: 5 * time.Second})
-	req := domain.TranscribeRequest{AudioPath: newAudioPath(t), Options: domain.Options{Model: "base", Task: domain.TaskTranscribe, BeamSize: 5}}
+	req := domain.TranscribeRequest{AudioPath: newAudioPath(t), Options: domain.Options{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe, BeamSize: 5}}
 
 	_, err := tr.Transcribe(context.Background(), req)
 	require.Error(t, err)
@@ -227,11 +227,11 @@ func TestTranscribe_missingOutputFileIsToolFailure(t *testing.T) {
 
 func TestTranscribe_malformedOutputJSONIsToolFailure(t *testing.T) {
 	modelDir := t.TempDir()
-	newModel(t, modelDir, "base")
+	newModel(t, modelDir, "large-v3-turbo-q5_0")
 	bin := writeScript(t, stubThatWritesOutput("not valid json"))
 
 	tr := New(Config{Binary: bin, ModelDir: modelDir, Timeout: 5 * time.Second})
-	req := domain.TranscribeRequest{AudioPath: newAudioPath(t), Options: domain.Options{Model: "base", Task: domain.TaskTranscribe, BeamSize: 5}}
+	req := domain.TranscribeRequest{AudioPath: newAudioPath(t), Options: domain.Options{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe, BeamSize: 5}}
 
 	_, err := tr.Transcribe(context.Background(), req)
 	require.Error(t, err)
@@ -240,11 +240,11 @@ func TestTranscribe_malformedOutputJSONIsToolFailure(t *testing.T) {
 
 func TestTranscribe_timeout(t *testing.T) {
 	modelDir := t.TempDir()
-	newModel(t, modelDir, "base")
+	newModel(t, modelDir, "large-v3-turbo-q5_0")
 	bin := writeScript(t, "#!/usr/bin/env bash\nsleep 5\n")
 
 	tr := New(Config{Binary: bin, ModelDir: modelDir, Timeout: 200 * time.Millisecond})
-	req := domain.TranscribeRequest{AudioPath: newAudioPath(t), Options: domain.Options{Model: "base", Task: domain.TaskTranscribe, BeamSize: 5}}
+	req := domain.TranscribeRequest{AudioPath: newAudioPath(t), Options: domain.Options{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe, BeamSize: 5}}
 
 	start := time.Now()
 	_, err := tr.Transcribe(context.Background(), req)
@@ -257,7 +257,7 @@ func TestTranscribe_timeout(t *testing.T) {
 
 func TestTranscribe_ctxCanceledKillsProcessGroup(t *testing.T) {
 	modelDir := t.TempDir()
-	newModel(t, modelDir, "base")
+	newModel(t, modelDir, "large-v3-turbo-q5_0")
 	childPIDFile := filepath.Join(t.TempDir(), "child.pid")
 	bin := writeScript(t, `#!/usr/bin/env bash
 sleep 100 &
@@ -266,7 +266,7 @@ sleep 5
 `)
 
 	tr := New(Config{Binary: bin, ModelDir: modelDir, Timeout: 10 * time.Second})
-	req := domain.TranscribeRequest{AudioPath: newAudioPath(t), Options: domain.Options{Model: "base", Task: domain.TaskTranscribe, BeamSize: 5}}
+	req := domain.TranscribeRequest{AudioPath: newAudioPath(t), Options: domain.Options{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe, BeamSize: 5}}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -296,7 +296,7 @@ sleep 5
 
 func TestTranscribe_wordTimestampsUsesOJFAndPopulatesWords(t *testing.T) {
 	modelDir := t.TempDir()
-	newModel(t, modelDir, "base")
+	newModel(t, modelDir, "large-v3-turbo-q5_0")
 
 	// The stub asserts -ojf (not -oj) was actually passed, by only
 	// producing valid output when it sees -ojf — proving Transcribe's
@@ -324,7 +324,7 @@ exit 0
 	tr := New(Config{Binary: bin, ModelDir: modelDir, Timeout: 5 * time.Second})
 	req := domain.TranscribeRequest{
 		AudioPath: newAudioPath(t),
-		Options:   domain.Options{Model: "base", Task: domain.TaskTranscribe, BeamSize: 5, WordTimestamps: true},
+		Options:   domain.Options{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe, BeamSize: 5, WordTimestamps: true},
 	}
 
 	got, err := tr.Transcribe(context.Background(), req)

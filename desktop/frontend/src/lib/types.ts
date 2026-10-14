@@ -80,7 +80,7 @@ export type ErrorCode =
 
 /** Mirrors internal/domain.Options field for field. */
 export interface Options {
-  /** Whisper model name, e.g. "base", "large-v3". Empty means the configured default. */
+  /** Whisper model name, "large-v3-turbo-q5_0". Empty means the configured default. */
   model: string;
   /** ISO-639-1/639-2 code. Empty means auto-detect. */
   language: string;

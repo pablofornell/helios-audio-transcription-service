@@ -35,8 +35,8 @@ func validConfig() *Config {
 			Kind:          "whispercpp",
 			Binary:        "whisper-cli",
 			ModelDir:      "/models",
-			DefaultModel:  "large-v3",
-			AllowedModels: []string{"tiny", "base", "small", "medium", "large-v3"},
+			DefaultModel:  SupportedModel,
+			AllowedModels: []string{SupportedModel},
 			Threads:       4,
 			Timeout:       30 * time.Minute,
 		},
@@ -209,6 +209,24 @@ func TestValidate_AllowedModelsMustNotBeEmpty(t *testing.T) {
 
 	cfg.Transcriber.AllowedModels = []string{}
 	assert.Error(t, cfg.Validate())
+}
+
+// Even an explicit environment allowlist cannot re-enable retired models.
+func TestLoad_RejectsUnsupportedModels(t *testing.T) {
+	for _, model := range []string{"tiny", "base", "small", "medium", "large-v3", "large-v3-turbo", "not-a-real-model"} {
+		t.Run(model, func(t *testing.T) {
+			t.Setenv("HELIOS_TRANSCRIBER_DEFAULT_MODEL", model)
+			t.Setenv("HELIOS_TRANSCRIBER_ALLOWED_MODELS", model)
+			_, err := Load()
+			require.ErrorContains(t, err, "unsupported")
+		})
+	}
+	t.Run("retired model alongside supported default", func(t *testing.T) {
+		t.Setenv("HELIOS_TRANSCRIBER_DEFAULT_MODEL", SupportedModel)
+		t.Setenv("HELIOS_TRANSCRIBER_ALLOWED_MODELS", SupportedModel+",base")
+		_, err := Load()
+		require.ErrorContains(t, err, "unsupported")
+	})
 }
 
 func TestValidate_TimeoutsMustLeaveHeadroomUnderJobTimeout(t *testing.T) {
@@ -437,8 +455,8 @@ func TestLoad_AllDefaults(t *testing.T) {
 	assert.Equal(t, "whispercpp", cfg.Transcriber.Kind)
 	assert.Equal(t, "whisper-cli", cfg.Transcriber.Binary)
 	assert.Equal(t, "/models", cfg.Transcriber.ModelDir)
-	assert.Equal(t, "large-v3", cfg.Transcriber.DefaultModel)
-	assert.Equal(t, []string{"tiny", "base", "small", "medium", "large-v3"}, cfg.Transcriber.AllowedModels)
+	assert.Equal(t, SupportedModel, cfg.Transcriber.DefaultModel)
+	assert.Equal(t, []string{SupportedModel}, cfg.Transcriber.AllowedModels)
 	assert.Equal(t, 4, cfg.Transcriber.Threads)
 	assert.False(t, cfg.Transcriber.NoGPU)
 	assert.Equal(t, 0, cfg.Transcriber.GPUDevice)
@@ -572,11 +590,11 @@ func TestLoad_ValidatesAfterParsing(t *testing.T) {
 }
 
 func TestLoad_AllowedModelsCommaList(t *testing.T) {
-	t.Setenv("HELIOS_TRANSCRIBER_ALLOWED_MODELS", "tiny, base , large-v3")
+	t.Setenv("HELIOS_TRANSCRIBER_ALLOWED_MODELS", " large-v3-turbo-q5_0 ")
 
 	cfg, err := Load()
 	require.NoError(t, err)
-	assert.Equal(t, []string{"tiny", "base", "large-v3"}, cfg.Transcriber.AllowedModels)
+	assert.Equal(t, []string{SupportedModel}, cfg.Transcriber.AllowedModels)
 }
 
 func TestLoad_CORSAllowedOrigins_UnsetDisablesIt(t *testing.T) {
@@ -630,8 +648,8 @@ func TestLoad_FullCustomEnvironment(t *testing.T) {
 		"HELIOS_TRANSCRIBER_KIND":              "fake",
 		"HELIOS_TRANSCRIBER_BINARY":            "/usr/local/bin/whisper-cli",
 		"HELIOS_TRANSCRIBER_MODEL_DIR":         "/srv/models",
-		"HELIOS_TRANSCRIBER_DEFAULT_MODEL":     "small",
-		"HELIOS_TRANSCRIBER_ALLOWED_MODELS":    "small,medium",
+		"HELIOS_TRANSCRIBER_DEFAULT_MODEL":     SupportedModel,
+		"HELIOS_TRANSCRIBER_ALLOWED_MODELS":    SupportedModel,
 		"HELIOS_TRANSCRIBER_THREADS":           "8",
 		"HELIOS_TRANSCRIBER_NO_GPU":            "true",
 		"HELIOS_TRANSCRIBER_GPU_DEVICE":        "2",
@@ -691,8 +709,8 @@ func TestLoad_FullCustomEnvironment(t *testing.T) {
 		Kind:          "fake",
 		Binary:        "/usr/local/bin/whisper-cli",
 		ModelDir:      "/srv/models",
-		DefaultModel:  "small",
-		AllowedModels: []string{"small", "medium"},
+		DefaultModel:  SupportedModel,
+		AllowedModels: []string{SupportedModel},
 		Threads:       8,
 		NoGPU:         true,
 		GPUDevice:     2,

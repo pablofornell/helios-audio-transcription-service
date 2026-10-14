@@ -13,6 +13,8 @@ import type { Options, Task } from "../../lib";
 
 const STORAGE_KEY = "helios.transcribe.composerOptions";
 
+export const SUPPORTED_MODEL = "large-v3-turbo-q5_0";
+
 export const DEFAULT_OPTIONS: Options = {
   model: "",
   language: "",
@@ -33,7 +35,8 @@ function loadOptions(): Options {
     const task = VALID_TASKS.includes(parsed.task as Task) ? (parsed.task as Task) : DEFAULT_OPTIONS.task;
     return {
       ...DEFAULT_OPTIONS,
-      model: typeof parsed.model === "string" ? parsed.model : DEFAULT_OPTIONS.model,
+      // Retired or foreign saved models fall back to the supported server default.
+      model: parsed.model === SUPPORTED_MODEL ? parsed.model : DEFAULT_OPTIONS.model,
       language: typeof parsed.language === "string" ? parsed.language : DEFAULT_OPTIONS.language,
       task,
       wordTimestamps: Boolean(parsed.wordTimestamps),

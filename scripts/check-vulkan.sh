@@ -46,7 +46,7 @@ echo '[3/3] Transcribing with whisper-cli and checking Vulkan backend selection'
 # shellcheck disable=SC2016
 "${compose[@]}" run --rm --no-deps \
   --volume "${audio_path}:/vulkan-check.wav:ro" --entrypoint /bin/sh helios -eu -c '
-  whisper-cli -m "/models/ggml-${HELIOS_TRANSCRIBER_DEFAULT_MODEL:-large-v3}.bin" \
+  whisper-cli -m "/models/ggml-${HELIOS_TRANSCRIBER_DEFAULT_MODEL:-large-v3-turbo-q5_0}.bin" \
     -f /vulkan-check.wav -t "${HELIOS_TRANSCRIBER_THREADS:-4}" \
     --device "${HELIOS_TRANSCRIBER_GPU_DEVICE:-0}" \
     -l auto -oj -of /tmp/vulkan-check > /tmp/whisper-stdout.txt 2>/tmp/whisper-stderr.txt || {

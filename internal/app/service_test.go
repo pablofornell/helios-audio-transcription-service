@@ -41,8 +41,8 @@ type testHarness struct {
 
 // newHarness builds a Service wired to fresh fakes, with production
 // defaults sane enough that most tests need not touch them: a generous
-// MaxUploadBytes and MinFreeBytes, and a two-model allow-list including the
-// default. opts, if given, mutate the Deps before NewService is called, for
+// MaxUploadBytes and MinFreeBytes, and the supported turbo model as the
+// default and sole allowed model. opts, if given, mutate the Deps before NewService is called, for
 // the handful of tests that need a tighter limit.
 func newHarness(t *testing.T, opts ...func(*Deps)) *testHarness {
 	t.Helper()
@@ -68,8 +68,8 @@ func newHarness(t *testing.T, opts ...func(*Deps)) *testHarness {
 		IDs:            h.ids,
 		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Metrics:        h.metrics,
-		DefaultModel:   "base",
-		AllowedModels:  []string{"base", "small", "large-v3"},
+		DefaultModel:   "large-v3-turbo-q5_0",
+		AllowedModels:  []string{"large-v3-turbo-q5_0"},
 		MaxAttempts:    3,
 		MaxUploadBytes: 1 << 20, // 1 MiB
 		MinFreeBytes:   1024,
@@ -123,7 +123,7 @@ func TestSubmit_Success(t *testing.T) {
 	assert.Equal(t, 3, got.MaxAttempts)
 	assert.Equal(t, h.clock.Now(), got.CreatedAt)
 	assert.Equal(t, h.clock.Now(), got.UpdatedAt)
-	assert.Equal(t, "base", got.Options.Model, "an empty Options.Model must resolve to Deps.DefaultModel")
+	assert.Equal(t, "large-v3-turbo-q5_0", got.Options.Model, "an empty Options.Model must resolve to Deps.DefaultModel")
 	assert.Equal(t, "My Recording.MP3", got.Audio.Filename)
 	assert.Equal(t, "audio/wav", got.Audio.MediaType)
 	assert.Equal(t, int64(len(body)), got.Audio.SizeBytes)
@@ -280,13 +280,13 @@ func TestSubmit_AppliesOptionsDiscoveredAfterBodyEOF(t *testing.T) {
 	h := newHarness(t)
 	body := &lateOptionsBody{
 		Reader:    strings.NewReader("audio-bytes"),
-		late:      domain.Options{Model: "large-v3", Task: domain.TaskTranslate, WordTimestamps: true},
+		late:      domain.Options{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranslate, WordTimestamps: true},
 		lateFound: true,
 	}
 
 	got, err := h.svc.Submit(context.Background(), SubmitRequest{Filename: "a.wav", Body: body})
 	require.NoError(t, err)
-	assert.Equal(t, "large-v3", got.Options.Model)
+	assert.Equal(t, "large-v3-turbo-q5_0", got.Options.Model)
 	assert.Equal(t, domain.TaskTranslate, got.Options.Task)
 	assert.True(t, got.Options.WordTimestamps)
 }
@@ -297,11 +297,11 @@ func TestSubmit_LateOptionsNotFoundKeepsOriginal(t *testing.T) {
 
 	got, err := h.svc.Submit(context.Background(), SubmitRequest{
 		Filename: "a.wav",
-		Options:  domain.Options{Model: "small"},
+		Options:  domain.Options{Model: "large-v3-turbo-q5_0"},
 		Body:     body,
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "small", got.Options.Model, "no late options found must leave req.Options as the final word")
+	assert.Equal(t, "large-v3-turbo-q5_0", got.Options.Model, "no late options found must leave req.Options as the final word")
 }
 
 func TestSubmit_InvalidLateOptionsCleansUpAlreadyWrittenBytes(t *testing.T) {

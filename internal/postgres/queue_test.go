@@ -248,7 +248,7 @@ func TestStore_Finish_Succeeded(t *testing.T) {
 	require.NotNil(t, claimed)
 	require.NotNil(t, claimed.LeaseToken)
 
-	result := &domain.Result{Text: "ok", Language: "en", Model: "base", Task: domain.TaskTranscribe}
+	result := &domain.Result{Text: "ok", Language: "en", Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe}
 	require.NoError(t, store.Finish(ctx, domain.FinishRequest{
 		ID: id, LeaseToken: *claimed.LeaseToken, Status: domain.StatusSucceeded, Result: result,
 	}))
@@ -368,7 +368,7 @@ func TestStore_Finish_StaleLeaseIsConflict(t *testing.T) {
 	// ReleaseExpired invalidated -- not the fresh token w2's Claim minted.
 	err = store.Finish(ctx, domain.FinishRequest{
 		ID: id, LeaseToken: staleToken, Status: domain.StatusSucceeded,
-		Result: &domain.Result{Model: "base", Task: domain.TaskTranscribe},
+		Result: &domain.Result{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe},
 	})
 	require.Error(t, err)
 	assert.Equal(t, domain.ErrCodeConflict, domain.CodeOf(err))
@@ -437,7 +437,7 @@ func TestStore_Heartbeat_And_Finish_RejectStaleExecutionAfterSameOwnerReclaim(t 
 	// allowed to record any outcome over the row the second claim now owns.
 	err = store.Finish(ctx, domain.FinishRequest{
 		ID: id, LeaseToken: staleToken, Status: domain.StatusSucceeded,
-		Result: &domain.Result{Model: "base", Task: domain.TaskTranscribe},
+		Result: &domain.Result{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe},
 	})
 	require.Error(t, err)
 	assert.Equal(t, domain.ErrCodeConflict, domain.CodeOf(err),
@@ -451,7 +451,7 @@ func TestStore_Heartbeat_And_Finish_RejectStaleExecutionAfterSameOwnerReclaim(t 
 
 	require.NoError(t, store.Finish(ctx, domain.FinishRequest{
 		ID: id, LeaseToken: *secondClaim.LeaseToken, Status: domain.StatusSucceeded,
-		Result: &domain.Result{Model: "base", Task: domain.TaskTranscribe},
+		Result: &domain.Result{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe},
 	}))
 
 	got, err := store.Get(ctx, id)
@@ -572,7 +572,7 @@ func TestStore_Finish_SucceededOnCancelRequestedRowRecordsCanceled(t *testing.T)
 
 	require.NoError(t, store.Finish(ctx, domain.FinishRequest{
 		ID: id, LeaseToken: *claimed.LeaseToken, Status: domain.StatusSucceeded,
-		Result: &domain.Result{Model: "base", Task: domain.TaskTranscribe},
+		Result: &domain.Result{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe},
 	}))
 
 	got, err := store.Get(ctx, id)
@@ -758,7 +758,7 @@ func TestStore_Finish_SucceededOnCancelRequestedRowNullsResultAndSetsCanceledErr
 	_, err = store.RequestCancel(ctx, id)
 	require.NoError(t, err)
 
-	result := &domain.Result{Text: "must never be served", Language: "en", Model: "base", Task: domain.TaskTranscribe}
+	result := &domain.Result{Text: "must never be served", Language: "en", Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe}
 	require.NoError(t, store.Finish(ctx, domain.FinishRequest{
 		ID: id, LeaseToken: *claimed.LeaseToken, Status: domain.StatusSucceeded, Result: result,
 	}))

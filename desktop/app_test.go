@@ -233,7 +233,7 @@ func TestApp_Submit(t *testing.T) {
 	}
 	a := &App{api: api}
 
-	got, err := a.Submit(SubmitRequestDTO{FilePath: path, Options: OptionsDTO{Model: "base"}})
+	got, err := a.Submit(SubmitRequestDTO{FilePath: path, Options: OptionsDTO{Model: "large-v3-turbo-q5_0"}})
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}

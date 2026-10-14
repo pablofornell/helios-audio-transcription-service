@@ -27,9 +27,9 @@ func indexOf(args []string, s string) int {
 
 func TestBuildArgs_fixedFlags(t *testing.T) {
 	req := baseReq()
-	args := buildArgs(Config{Threads: 4}, req, "/models/ggml-base.bin", "/tmp/out/transcript")
+	args := buildArgs(Config{Threads: 4}, req, "/models/ggml-large-v3-turbo-q5_0.bin", "/tmp/out/transcript")
 
-	assert.Equal(t, "/models/ggml-base.bin", args[indexOf(args, "-m")+1])
+	assert.Equal(t, "/models/ggml-large-v3-turbo-q5_0.bin", args[indexOf(args, "-m")+1])
 	assert.Equal(t, req.AudioPath, args[indexOf(args, "-f")+1])
 	assert.Equal(t, "4", args[indexOf(args, "-t")+1])
 	assert.Equal(t, "/tmp/out/transcript", args[indexOf(args, "-of")+1])

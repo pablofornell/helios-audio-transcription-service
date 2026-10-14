@@ -6,7 +6,7 @@ import { type QueueRowModel } from "./useTranscribeQueue";
 const row = (id: string, status: Status, createdAt: string, completedAt?: string): QueueRowModel => ({
   kind: "real", key: id, transcription: {
     id, status, createdAt, completedAt, updatedAt: createdAt,
-    options: { model: "base", language: "", task: "transcribe", wordTimestamps: false, initialPrompt: "", beamSize: 5, temperature: 0 },
+    options: { model: "large-v3-turbo-q5_0", language: "", task: "transcribe", wordTimestamps: false, initialPrompt: "", beamSize: 5, temperature: 0 },
     audio: { filename: id, mediaType: "audio/wav", sizeBytes: 1, durationSeconds: 1, sampleRateHz: 16000, channels: 1, codec: "pcm" },
     attempts: 0, maxAttempts: 3,
   } satisfies Transcription,

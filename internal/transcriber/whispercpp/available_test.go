@@ -15,10 +15,10 @@ import (
 
 func TestAvailable_success(t *testing.T) {
 	modelDir := t.TempDir()
-	newModel(t, modelDir, "base")
+	newModel(t, modelDir, "large-v3-turbo-q5_0")
 	bin := writeScript(t, "#!/usr/bin/env bash\nexit 0\n")
 
-	tr := New(Config{Binary: bin, ModelDir: modelDir, DefaultModel: "base", Timeout: 5 * time.Second})
+	tr := New(Config{Binary: bin, ModelDir: modelDir, DefaultModel: "large-v3-turbo-q5_0", Timeout: 5 * time.Second})
 	require.NoError(t, tr.Available(context.Background()))
 }
 
@@ -29,10 +29,10 @@ func TestAvailable_success(t *testing.T) {
 // configured default model's weight file exists, not just that the
 // directory can be listed.
 func TestAvailable_defaultModelMissing(t *testing.T) {
-	modelDir := t.TempDir() // empty: no ggml-base.bin written
+	modelDir := t.TempDir() // empty: no ggml-large-v3-turbo-q5_0.bin written
 	bin := writeScript(t, "#!/usr/bin/env bash\nexit 0\n")
 
-	tr := New(Config{Binary: bin, ModelDir: modelDir, DefaultModel: "base", Timeout: 5 * time.Second})
+	tr := New(Config{Binary: bin, ModelDir: modelDir, DefaultModel: "large-v3-turbo-q5_0", Timeout: 5 * time.Second})
 	err := tr.Available(context.Background())
 	require.Error(t, err)
 	assert.Equal(t, domain.ErrCodeModelUnavailable, domain.CodeOf(err))

@@ -25,7 +25,7 @@ vi.mock("../../lib", async (original) => {
 afterEach(() => { runtime.desktop = false; runtime.heldVersion = undefined; vi.clearAllMocks(); });
 const row: Transcription = {
   id: "detail-source", status: "pending", attempts: 0, maxAttempts: 3,
-  options: { model: "base", language: "", task: "transcribe", wordTimestamps: false, initialPrompt: "", beamSize: 5, temperature: 0 },
+  options: { model: "large-v3-turbo-q5_0", language: "", task: "transcribe", wordTimestamps: false, initialPrompt: "", beamSize: 5, temperature: 0 },
   audio: { filename: "clip.mp3", mediaType: "audio/mpeg", sizeBytes: 1024, durationSeconds: 0, sampleRateHz: 0, channels: 0, codec: "" },
   createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
 };
@@ -44,7 +44,7 @@ it("hides audio preview and download when source metadata is absent", async () =
   expect(screen.queryByRole("button", { name: "Download audio" })).not.toBeInTheDocument();
 });
 it("invalidates transcript text when the saved server changes", async () => {
-  const result = { text: "First", language: "en", model: "base", task: "transcribe" as const, durationSeconds: 1, segments: [] };
+  const result = { text: "First", language: "en", model: "large-v3-turbo-q5_0", task: "transcribe" as const, durationSeconds: 1, segments: [] };
   vi.mocked(transcript).mockResolvedValueOnce("First server text").mockResolvedValueOnce("Second server text");
   render(panel({ ...row, status: "succeeded", result }));
   expect(await screen.findByText("First server text")).toBeInTheDocument();
@@ -119,4 +119,18 @@ it.each(mediaActions)("fences $label success before the server render commits", 
     await old.promise;
   });
   expect(screen.getByRole("button", { name: label })).toBeDisabled();
+});
+
+
+it("keeps historical model names and completed transcripts accessible", async () => {
+  const legacy: Transcription = {
+    ...row, status: "succeeded", options: { ...row.options, model: "base" },
+    result: { text: "Historical transcript", language: "en", model: "base", task: "transcribe", durationSeconds: 1, segments: [] },
+  };
+  vi.mocked(transcript).mockResolvedValueOnce("Historical transcript");
+  render(panel(legacy));
+  expect(await screen.findByText("Historical transcript")).toBeInTheDocument();
+  expect(screen.getByText("Transcribe · base · auto-detect")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Save as…" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Download audio" })).toBeEnabled();
 });

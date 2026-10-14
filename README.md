@@ -55,7 +55,7 @@ curl -s -X POST localhost:7462/api/v1/transcriptions \
   "id": "7e3c2c1a-9e0b-4f2a-8a3a-1a2b3c4d5e6f",
   "status": "pending",
   "options": {
-    "model": "large-v3",
+    "model": "large-v3-turbo-q5_0",
     "language": "",
     "task": "transcribe",
     "wordTimestamps": true,
@@ -102,7 +102,7 @@ curl -s localhost:7462/api/v1/transcriptions/7e3c2c1a-9e0b-4f2a-8a3a-1a2b3c4d5e6
     "text": "Thanks for joining me today. Let's start with...",
     "language": "en",
     "durationSeconds": 214.32,
-    "model": "large-v3",
+    "model": "large-v3-turbo-q5_0",
     "task": "transcribe",
     "segments": [
       {"id": 0, "start": 0.0, "end": 3.2, "text": "Thanks for joining me today."}
@@ -132,10 +132,10 @@ export the variables directly for `go run`/`make run`. The ones worth knowing up
 | `HELIOS_STORAGE_MIN_FREE_BYTES` | `1073741824` (1 GiB) | Uploads are refused once free space on this volume drops below it. |
 | `HELIOS_TRANSCRIBER_KIND` | `whispercpp` | `whispercpp` for real transcription via the `whisper-cli` subprocess, `fake` for a deterministic, no-subprocess double (tests, local dev). |
 | `HELIOS_TRANSCRIBER_MODEL_DIR` | `/models` | Holds `ggml-<model>.bin` weight files — see `docs/RUNBOOK.md`. |
-| `HELIOS_TRANSCRIBER_DEFAULT_MODEL` | `large-v3` | Used when a submission's `options.model` is empty. |
+| `HELIOS_TRANSCRIBER_DEFAULT_MODEL` | `large-v3-turbo-q5_0` | Used when a submission's `options.model` is empty. |
 | `HELIOS_TRANSCRIBER_NO_GPU` | `false` | GPU takes priority by default. Set `true` to force CPU transcription (`--no-gpu`). |
 | `HELIOS_TRANSCRIBER_GPU_DEVICE` | `0` | Nonnegative whisper-cli GPU index (`--device`), ignored in CPU mode. |
-| `HELIOS_TRANSCRIBER_ALLOWED_MODELS` | `tiny,base,small,medium,large-v3` | Comma-separated allow-list `options.model` must belong to when non-empty. |
+| `HELIOS_TRANSCRIBER_ALLOWED_MODELS` | `large-v3-turbo-q5_0` | Only `large-v3-turbo-q5_0` is supported; configuration rejects other names. |
 | `HELIOS_WORKER_CONCURRENCY` | `2` | How many transcriptions run at once per process. |
 | `HELIOS_AUDIO_MAX_DURATION` | `4h` | Audio longer than this is rejected (at probe time — see `docs/ARCHITECTURE.md`). |
 | `HELIOS_RETENTION_MAX_AGE` | `168h` (7 days) | How old a terminal (succeeded/failed/canceled) transcription must be before the retention sweep deletes it — database row and files both. See `docs/RUNBOOK.md`. |
@@ -144,7 +144,7 @@ export the variables directly for `go run`/`make run`. The ones worth knowing up
 For a **Ryzen 7 7730U on Linux**, use the AMD Vulkan Compose override described in
 the [runbook](docs/RUNBOOK.md#amd-vulkan-ryzen-7-7730u). It grants the service user
 access to the AMD render node, selects Mesa RADV, and defaults to one job at a time.
-The default model is `large-v3`; use four CPU threads and measure with your own
+The default model is `large-v3-turbo-q5_0`; use four CPU threads and measure with your own
 audio before increasing concurrency. `scripts/check-vulkan.sh` checks device access
 and, with a WAV file, verifies actual Vulkan transcription.
 
@@ -159,18 +159,17 @@ across every sibling service — not this one service alone. Don't rename them t
 ## Things to know before you start
 
 **Transcription is asynchronous — `POST /transcriptions` always returns 202, never a
-finished result.** A single job can take minutes of CPU-bound work (`large-v3` on an
+finished result.** A single job can take minutes of CPU-bound work (`large-v3-turbo-q5_0` on an
 hour of audio, in particular); the endpoint validates the request, stores the upload
 and queues it, then a worker in the same process runs the actual pipeline. Poll
 `GET /transcriptions/{id}` (or build a client that does) until `status` reaches
 `succeeded`, `failed` or `canceled` — there is no webhook and no SSE stream.
 
-**Model weights are your responsibility, not ATS's.** Nothing here downloads
-`ggml-<model>.bin` files automatically — see `docs/RUNBOOK.md`'s **Prerequisites**
-before submitting anything against a model you haven't fetched. A job that requests a
-model with no matching file on disk fails individually with
-`error.code: "model_unavailable"`, not a startup error, since ATS has no way to know
-which models you'll actually ask for until you ask.
+**Model weights are provisioned separately.** Only `large-v3-turbo-q5_0` is
+supported for new submissions. Run `make models` to fetch
+`ggml-large-v3-turbo-q5_0.bin`; see `docs/RUNBOOK.md`'s **Prerequisites**.
+Missing default weights make the service unready. Other model names are rejected
+as invalid input. Existing jobs and transcripts retain their recorded model names.
 
 **Speaker diarization is out of scope.** ATS produces segments and, optionally,
 word-level timestamps — never speaker labels. There is also no authentication layer:

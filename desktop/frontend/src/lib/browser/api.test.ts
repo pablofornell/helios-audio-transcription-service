@@ -30,7 +30,7 @@ function makeWireTranscription(overrides: Partial<Transcription> = {}): Transcri
     id: "11111111-1111-1111-1111-111111111111",
     status: "pending",
     options: {
-      model: "base",
+      model: "large-v3-turbo-q5_0",
       language: "",
       task: "transcribe",
       wordTimestamps: false,

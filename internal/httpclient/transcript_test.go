@@ -20,7 +20,7 @@ func TestGetTranscript_AllFourFormats(t *testing.T) {
 		contentType string
 		body        string
 	}{
-		{transcript.FormatJSON, "application/json", `{"text":"hello world","language":"en","durationSeconds":1.5,"model":"base","task":"transcribe","segments":[]}`},
+		{transcript.FormatJSON, "application/json", `{"text":"hello world","language":"en","durationSeconds":1.5,"model":"large-v3-turbo-q5_0","task":"transcribe","segments":[]}`},
 		{transcript.FormatText, "text/plain; charset=utf-8", "hello world\n"},
 		{transcript.FormatSRT, "application/x-subrip; charset=utf-8", "1\r\n00:00:00,000 --> 00:00:01,500\r\nhello world\r\n\r\n"},
 		{transcript.FormatVTT, "text/vtt; charset=utf-8", "WEBVTT\n\n00:00:00.000 --> 00:00:01.500\nhello world\n"},
@@ -70,7 +70,7 @@ func TestGetTranscriptResult_DecodesResult(t *testing.T) {
 			Text:            "hello world",
 			Language:        "en",
 			DurationSeconds: 1.5,
-			Model:           "base",
+			Model:           "large-v3-turbo-q5_0",
 			Task:            domain.TaskTranscribe,
 			Segments: []domain.Segment{
 				{ID: 0, Start: 0, End: 1.5, Text: "hello world"},
@@ -82,7 +82,7 @@ func TestGetTranscriptResult_DecodesResult(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "hello world", result.Text)
 	assert.Equal(t, "en", result.Language)
-	assert.Equal(t, "base", result.Model)
+	assert.Equal(t, "large-v3-turbo-q5_0", result.Model)
 	require.Len(t, result.Segments, 1)
 	assert.Equal(t, "hello world", result.Segments[0].Text)
 }

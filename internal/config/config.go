@@ -20,6 +20,9 @@ import (
 // reads.
 const envPrefix = "HELIOS_"
 
+// SupportedModel is the only model supported for new transcription requests.
+const SupportedModel = "large-v3-turbo-q5_0"
+
 // giB is one gibibyte, used to spell out a couple of the byte-count
 // defaults below without a long string of digits.
 const giB = 1 << 30
@@ -82,7 +85,7 @@ type TranscriberConfig struct {
 	// DefaultModel is used when a submission's Options.Model is empty.
 	DefaultModel string
 	// AllowedModels is the set Options.Model must belong to. Parsed from a
-	// comma-separated list.
+	// comma-separated list; only SupportedModel is supported.
 	AllowedModels []string
 	// Threads is the -t value passed to whisper-cli.
 	Threads int
@@ -247,8 +250,8 @@ func Load() (*Config, error) {
 			Kind:          l.getString("TRANSCRIBER_KIND", "whispercpp"),
 			Binary:        l.getString("TRANSCRIBER_BINARY", "whisper-cli"),
 			ModelDir:      l.getString("TRANSCRIBER_MODEL_DIR", "/models"),
-			DefaultModel:  l.getString("TRANSCRIBER_DEFAULT_MODEL", "large-v3"),
-			AllowedModels: l.getStringSlice("TRANSCRIBER_ALLOWED_MODELS", []string{"tiny", "base", "small", "medium", "large-v3"}),
+			DefaultModel:  l.getString("TRANSCRIBER_DEFAULT_MODEL", SupportedModel),
+			AllowedModels: l.getStringSlice("TRANSCRIBER_ALLOWED_MODELS", []string{SupportedModel}),
 			Threads:       l.getInt("TRANSCRIBER_THREADS", 4),
 			NoGPU:         l.getBool("TRANSCRIBER_NO_GPU", false),
 			GPUDevice:     l.getInt("TRANSCRIBER_GPU_DEVICE", 0),
@@ -397,6 +400,11 @@ func (c *Config) Validate() error {
 		// (review finding; see domain.Options.Validate and
 		// whispercpp.modelPath).
 		return fmt.Errorf("config: transcriber allowed models must not be empty")
+	}
+	for _, model := range c.Transcriber.AllowedModels {
+		if model != SupportedModel {
+			return fmt.Errorf("config: transcriber model %q is unsupported; only %q is supported", model, SupportedModel)
+		}
 	}
 	if !contains(c.Transcriber.AllowedModels, c.Transcriber.DefaultModel) {
 		return fmt.Errorf("config: transcriber default model %q must be one of the allowed models %v",

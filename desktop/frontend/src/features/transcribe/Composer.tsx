@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 import { EmptyState, Segmented, Select, Switch } from "../../components";
 import { chooseAudioFile, getServerSettingsVersion, useServerSettingsVersion, type AudioSource, type Options, type Task } from "../../lib";
 import { hasWailsRuntime } from "../../lib/runtime";
-import { useComposerOptions } from "./useComposerOptions";
+import { SUPPORTED_MODEL, useComposerOptions } from "./useComposerOptions";
 import type { SubmitOutcome } from "./useTranscribeQueue";
 import styles from "./Composer.module.css";
 
@@ -17,26 +17,11 @@ const TASK_OPTIONS: { value: Task; label: string }[] = [
   { value: "translate", label: "Translate to English" },
 ];
 
-// A fixed, sensible list rather than a live query: this service exposes no
-// "list installed models" endpoint (docs/openapi.yaml has none), and an
-// empty Model always means "use the configured default" server-side
-// (domain.Options' own doc), so the option list is illustrative of
-// whisper.cpp's real model names, not a source of truth this app can be
-// wrong about — an unrecognised or unavailable name is rejected by the
-// server itself (ErrCodeInvalidInput / ErrCodeModelUnavailable), same as
-// any other invalid submission.
+// Empty Model uses the configured default; explicit selection uses the same
+// supported quantized turbo model.
 const MODEL_OPTIONS = [
   { value: "", label: "Server default" },
-  { value: "tiny", label: "tiny" },
-  { value: "tiny.en", label: "tiny.en" },
-  { value: "base", label: "base" },
-  { value: "base.en", label: "base.en" },
-  { value: "small", label: "small" },
-  { value: "small.en", label: "small.en" },
-  { value: "medium", label: "medium" },
-  { value: "medium.en", label: "medium.en" },
-  { value: "large-v2", label: "large-v2" },
-  { value: "large-v3", label: "large-v3" },
+  { value: SUPPORTED_MODEL, label: SUPPORTED_MODEL },
 ];
 
 // ISO-639-1/639-2 codes domain.Options.Validate accepts (2-3 lowercase

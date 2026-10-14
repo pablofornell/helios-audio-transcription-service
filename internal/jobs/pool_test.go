@@ -94,7 +94,7 @@ func newTranscription(id string, maxAttempts int) *domain.Transcription {
 	return &domain.Transcription{
 		ID:          id,
 		Status:      domain.StatusPending,
-		Options:     domain.Options{Model: "base", Task: domain.TaskTranscribe, BeamSize: 5},
+		Options:     domain.Options{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe, BeamSize: 5},
 		Audio:       domain.Audio{Filename: "source.mp3", MediaType: "audio/mpeg", SizeBytes: 1024},
 		SourcePath:  fmt.Sprintf("transcriptions/%s/source.mp3", id),
 		MaxAttempts: maxAttempts,
@@ -166,8 +166,8 @@ func TestPool_HappyPath_Succeeds(t *testing.T) {
 
 		h.transcriber.transcribeFn = func(ctx context.Context, req domain.TranscribeRequest) (*domain.Result, error) {
 			assert.Equal(t, "/store/"+wavRelPath(id, firstClaimLeaseToken), req.AudioPath)
-			assert.Equal(t, "base", req.Options.Model)
-			return &domain.Result{Text: "hi there", Language: "en", Model: "base", Task: domain.TaskTranscribe, DurationSeconds: 12.5}, nil
+			assert.Equal(t, "large-v3-turbo-q5_0", req.Options.Model)
+			return &domain.Result{Text: "hi there", Language: "en", Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe, DurationSeconds: 12.5}, nil
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -658,7 +658,7 @@ func TestPool_ConcurrencyCeiling(t *testing.T) {
 				}
 			}
 			<-gate
-			return &domain.Result{Model: "base"}, nil
+			return &domain.Result{Model: "large-v3-turbo-q5_0"}, nil
 		}
 
 		const total = 5 // Concurrency + 1, and then some
@@ -707,7 +707,7 @@ func TestPool_Shutdown_DrainsInFlightJob(t *testing.T) {
 		release := make(chan struct{})
 		h.transcriber.transcribeFn = func(ctx context.Context, req domain.TranscribeRequest) (*domain.Result, error) {
 			<-release
-			return &domain.Result{Model: "base"}, nil
+			return &domain.Result{Model: "large-v3-turbo-q5_0"}, nil
 		}
 
 		ctx, cancelRun := context.WithCancel(context.Background())
@@ -774,7 +774,7 @@ func TestPool_Shutdown_ForceCancelsAfterDeadline(t *testing.T) {
 		h.transcriber.transcribeFn = func(ctx context.Context, req domain.TranscribeRequest) (*domain.Result, error) {
 			if strings.Contains(req.AudioPath, succeedID) {
 				<-release // ignores the forced cancel; returns a real result once released
-				return &domain.Result{Model: "base", Text: "finished despite forced shutdown"}, nil
+				return &domain.Result{Model: "large-v3-turbo-q5_0", Text: "finished despite forced shutdown"}, nil
 			}
 			<-ctx.Done() // only returns once its own context is canceled
 			return nil, ctx.Err()
@@ -867,7 +867,7 @@ func TestPool_Shutdown_NeverReturnsDrainedWithAnUnaccountedJob(t *testing.T) {
 		var started atomic.Bool
 		h.transcriber.transcribeFn = func(ctx context.Context, req domain.TranscribeRequest) (*domain.Result, error) {
 			started.Store(true)
-			return &domain.Result{Model: "base"}, nil
+			return &domain.Result{Model: "large-v3-turbo-q5_0"}, nil
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())

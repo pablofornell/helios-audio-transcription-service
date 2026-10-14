@@ -17,7 +17,7 @@ func TestResultJSONRoundTrip(t *testing.T) {
 		Text:            "Hello there. General Kenobi.",
 		Language:        "en",
 		DurationSeconds: 4.2,
-		Model:           "base",
+		Model:           "large-v3-turbo-q5_0",
 		Task:            TaskTranscribe,
 		Segments: []Segment{
 			{ID: 0, Start: 0, End: 2.1, Text: "Hello there.", Words: []Word{

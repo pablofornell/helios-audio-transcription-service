@@ -607,10 +607,9 @@ components:
         model:
           type: string
           description: >
-            Whisper model name, e.g. "base", "large-v3". Empty means the configured
-            default (HELIOS_TRANSCRIBER_DEFAULT_MODEL). When
-            HELIOS_TRANSCRIBER_ALLOWED_MODELS is non-empty, a non-empty value must be
-            one of that list.
+            Whisper model name. Only "large-v3-turbo-q5_0" is supported for new
+            submissions. Empty means the configured default
+            (HELIOS_TRANSCRIBER_DEFAULT_MODEL).
         language:
           type: string
           description: ISO-639-1/639-2 code (2-3 lowercase letters). Empty or "auto" means auto-detect.

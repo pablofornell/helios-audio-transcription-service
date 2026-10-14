@@ -27,9 +27,9 @@ function baseRow() {
   return {
     id: "save-as-1",
     status: "succeeded" as const,
-    options: { model: "base", language: "", task: "transcribe" as const, wordTimestamps: false, initialPrompt: "", beamSize: 5, temperature: 0 },
+    options: { model: "large-v3-turbo-q5_0", language: "", task: "transcribe" as const, wordTimestamps: false, initialPrompt: "", beamSize: 5, temperature: 0 },
     audio: { filename: "clip.mp3", mediaType: "audio/mpeg", sizeBytes: 1024, durationSeconds: 12, sampleRateHz: 16000, channels: 1, codec: "mp3" },
-    result: { text: "Hello", segments: [], language: "en", durationSeconds: 12, model: "base", task: "transcribe" as const },
+    result: { text: "Hello", segments: [], language: "en", durationSeconds: 12, model: "large-v3-turbo-q5_0", task: "transcribe" as const },
     attempts: 1,
     maxAttempts: 3,
     createdAt: "2026-01-01T00:00:00Z",

@@ -137,7 +137,7 @@ func sampleTranscription() *domain.Transcription {
 		ID:     "11111111-1111-4111-8111-111111111111",
 		Status: domain.StatusSucceeded,
 		Options: domain.Options{
-			Model:    "base",
+			Model:    "large-v3-turbo-q5_0",
 			Language: "en",
 			Task:     domain.TaskTranscribe,
 			BeamSize: 5,
@@ -156,7 +156,7 @@ func sampleTranscription() *domain.Transcription {
 			Text:            "hello world",
 			Language:        "en",
 			DurationSeconds: 12.5,
-			Model:           "base",
+			Model:           "large-v3-turbo-q5_0",
 			Task:            domain.TaskTranscribe,
 			Segments: []domain.Segment{
 				{ID: 0, Start: 0, End: 1.2, Text: "hello world"},
@@ -227,7 +227,7 @@ func TestSubmitTranscription_MultipartStreaming(t *testing.T) {
 
 	optPart, err := mw.CreateFormField("options")
 	require.NoError(t, err)
-	_, err = optPart.Write([]byte(`{"model":"base","language":"en"}`))
+	_, err = optPart.Write([]byte(`{"model":"large-v3-turbo-q5_0","language":"en"}`))
 	require.NoError(t, err)
 
 	fw, err := mw.CreateFormFile("file", "clip.mp3")
@@ -258,7 +258,7 @@ func TestSubmitTranscription_MultipartStreaming(t *testing.T) {
 
 	assert.Equal(t, wantBody, capturedBody, "the streamed file part must reach Service.Submit's Body byte for byte")
 	assert.Equal(t, "clip.mp3", capturedReq.Filename)
-	assert.Equal(t, "base", capturedReq.Options.Model)
+	assert.Equal(t, "large-v3-turbo-q5_0", capturedReq.Options.Model)
 	assert.Equal(t, "en", capturedReq.Options.Language)
 }
 
@@ -351,7 +351,7 @@ func TestSubmitTranscription_OptionsAfterFileIsHonoured(t *testing.T) {
 
 	optPart, err := mw.CreateFormField("options")
 	require.NoError(t, err)
-	_, err = optPart.Write([]byte(`{"model":"large-v3","task":"translate","wordTimestamps":true}`))
+	_, err = optPart.Write([]byte(`{"model":"large-v3-turbo-q5_0","task":"translate","wordTimestamps":true}`))
 	require.NoError(t, err)
 	require.NoError(t, mw.Close())
 
@@ -368,7 +368,7 @@ func TestSubmitTranscription_OptionsAfterFileIsHonoured(t *testing.T) {
 	assert.Equal(t, wantBody, capturedBody,
 		"the file part must still stream to Service.Submit byte for byte even when `options` arrives after it")
 	assert.True(t, lateFound, "an `options` part arriving after `file` must be discovered, not silently ignored")
-	assert.Equal(t, "large-v3", lateOpts.Model)
+	assert.Equal(t, "large-v3-turbo-q5_0", lateOpts.Model)
 	assert.Equal(t, domain.TaskTranslate, lateOpts.Task)
 	assert.True(t, lateOpts.WordTimestamps)
 }

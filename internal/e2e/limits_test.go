@@ -60,3 +60,23 @@ func TestPayloadTooLarge_WithinLimitStillSucceeds(t *testing.T) {
 	final := waitForStatus(t, ts.base, created.ID, domain.StatusSucceeded, terminalDeadline)
 	require.NotNil(t, final.Result)
 }
+
+// Exercise the real HTTP handler and service with the production model policy.
+func TestUnsupportedModelsRejected(t *testing.T) {
+	requireDocker(t)
+	ts := newTestServer(t)
+	for _, model := range []string{"base", "small", "medium", "large-v3", "large-v3-turbo"} {
+		t.Run(model, func(t *testing.T) {
+			contentType, body := buildUpload(t, "audio.wav", "audio/wav", []byte("audio"), &domain.Options{Model: model})
+			req, err := http.NewRequest(http.MethodPost, ts.base+"/api/v1/transcriptions", bytes.NewReader(body))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", contentType)
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+			derr := decodeError(t, resp)
+			assert.Equal(t, domain.ErrCodeInvalidInput, derr.Code)
+			assert.Equal(t, "model", derr.Details["field"])
+		})
+	}
+}

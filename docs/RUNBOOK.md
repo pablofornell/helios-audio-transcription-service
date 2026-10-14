@@ -26,38 +26,31 @@ To build from source, or to run `helios-transcription-api` outside its container
 
 ### `whisper-cli` and model weights
 
-ATS shells out to whisper.cpp's own CLI, `whisper-cli`, and expects model weight files
-named `ggml-<model>.bin` under `HELIOS_TRANSCRIBER_MODEL_DIR` (default `/models`) — one
-per model in `HELIOS_TRANSCRIBER_ALLOWED_MODELS`
-(default `tiny,base,small,medium,large-v3`). Neither the binary nor the weights are
-fetched automatically by ATS itself:
+ATS shells out to whisper.cpp's own CLI, `whisper-cli`, and supports only the
+quantized `large-v3-turbo-q5_0` model for new submissions. Both
+`HELIOS_TRANSCRIBER_DEFAULT_MODEL` and `HELIOS_TRANSCRIBER_ALLOWED_MODELS` must name
+`large-v3-turbo-q5_0`; configuration rejects other models. The weights must be
+`ggml-large-v3-turbo-q5_0.bin` under `HELIOS_TRANSCRIBER_MODEL_DIR` (default
+`/models`). ATS does not download weights automatically.
 
 1. Outside Docker, build or install `whisper-cli` from
-   [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) (`make` in that
-   repo builds `build/bin/whisper-cli`; put it on `PATH` or point
-   `HELIOS_TRANSCRIBER_BINARY` at it directly).
-2. Fetch model weights with that same repo's `models/download-ggml-model.sh` script,
-   e.g.:
+   [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) and put it on
+   `PATH`, or point `HELIOS_TRANSCRIBER_BINARY` at it directly.
+2. Run `make models` to fetch the supported weights into this repository's
+   `./models`. For a native deployment with another model directory, use:
    ```
-   ./models/download-ggml-model.sh base /models
-   ./models/download-ggml-model.sh large-v3 /models
+   ./models/download-ggml-model.sh large-v3-turbo-q5_0 /models
    ```
-   or download the `ggml-<model>.bin` files directly from
+   from the whisper.cpp repository, or fetch `ggml-large-v3-turbo-q5_0.bin` from
    [huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp)
-   into `HELIOS_TRANSCRIBER_MODEL_DIR`. At minimum, fetch whatever
-   `HELIOS_TRANSCRIBER_DEFAULT_MODEL` names (`large-v3` by default) — every other model in
-   `HELIOS_TRANSCRIBER_ALLOWED_MODELS` only needs to be present if a caller actually
-   requests it.
-3. `make models` wraps this download step (see `make help` for its exact model list and
-   destination — it targets the same `HELIOS_TRANSCRIBER_MODEL_DIR` layout).
+   into `HELIOS_TRANSCRIBER_MODEL_DIR`.
 
-A missing *default* model shows up as an unready service, not a silent failure:
-`Transcriber.Available` (the `/readyz`-facing check) confirms both that the model
-directory is readable and that `ggml-<HELIOS_TRANSCRIBER_DEFAULT_MODEL>.bin` is
-actually there, so a deploy with no weights fails its readiness probe instead of
-accepting work it cannot do. A job that requests some *other* allowed model whose
-`ggml-<model>.bin` is absent still fails individually with `ErrCodeModelUnavailable`
-(503) the moment a worker claims it. See **When a model is missing**, below.
+A missing default model makes the service unready: `Transcriber.Available`
+confirms that the model directory is readable and that the configured model file
+is present. Submissions naming another model are rejected as invalid input.
+Existing jobs and transcripts keep their historical model names; no database
+migration or deletion is required. Old browser composer selections reset to the
+supported server default when loaded.
 
 ### AMD Vulkan (Ryzen 7 7730U)
 
@@ -66,7 +59,7 @@ Ubuntu 24.04 for its Vulkan build/runtime dependencies, as in the
 [upstream Vulkan image](https://github.com/ggml-org/whisper.cpp/blob/v1.9.4/.devops/main-vulkan.Dockerfile).
 Vulkan works through the host's Linux `amdgpu` kernel driver and the container's
 [Mesa RADV driver](https://docs.mesa3d.org/drivers/radv.html). It does not require
-ROCm or `/dev/kfd`. The default model is `large-v3`. The GPU shares RAM with the CPU;
+ROCm or `/dev/kfd`. The default model is `large-v3-turbo-q5_0`. The GPU shares RAM with the CPU;
 use four CPU threads and one worker on the 7730U. These are starting settings, not a throughput
 guarantee. Compare representative audio in GPU and CPU mode.
 
@@ -87,7 +80,7 @@ HELIOS_RENDER_DEVICE=/dev/dri/renderD128
 HELIOS_RENDER_GID=992
 HELIOS_TRANSCRIBER_NO_GPU=false
 HELIOS_TRANSCRIBER_GPU_DEVICE=0
-HELIOS_TRANSCRIBER_DEFAULT_MODEL=large-v3
+HELIOS_TRANSCRIBER_DEFAULT_MODEL=large-v3-turbo-q5_0
 HELIOS_TRANSCRIBER_THREADS=4
 HELIOS_WORKER_CONCURRENCY=1
 ```
@@ -314,20 +307,24 @@ saturated or stalled. In order:
 
 ## When a model is missing
 
+Historical jobs keep their original model name. Removing obsolete weights does not
+delete their stored audio or transcripts. Resubmit historical failed audio using
+the supported model rather than fetching obsolete weights.
+
 A job fails with `error.code: "model_unavailable"` (not retried automatically — see
 `docs/ARCHITECTURE.md`'s retry policy) when `HELIOS_TRANSCRIBER_MODEL_DIR` has no
-`ggml-<model>.bin` matching the transcription's resolved `options.model`. Fix it, then
-retry the job(s):
+`ggml-large-v3-turbo-q5_0.bin` for a supported transcription. Restore
+the file, then retry the job(s):
 
 ```
 ls "$HELIOS_TRANSCRIBER_MODEL_DIR"        # confirm what's actually there
-./models/download-ggml-model.sh <model> "$HELIOS_TRANSCRIBER_MODEL_DIR"   # fetch it (see Prerequisites)
+./models/download-ggml-model.sh large-v3-turbo-q5_0 "$HELIOS_TRANSCRIBER_MODEL_DIR"   # fetch it (see Prerequisites)
 curl -X POST localhost:7462/api/v1/transcriptions/<id>/retry
 ```
 
 There's no bulk-retry endpoint; script over
 `GET /api/v1/transcriptions?status=failed` if you need one. If several jobs failed for
-the same missing model, freeing the model and retrying each is the correct fix, not
+the missing turbo model, restoring the weights and retrying each is the correct fix, not
 raising `HELIOS_WORKER_MAX_ATTEMPTS` — a missing file will not appear on its own no
 matter how many attempts are configured, which is exactly why this code is not in
 `ErrorCode.Retryable()`'s set.
