@@ -91,6 +91,7 @@ export namespace main {
 		}
 	}
 	export class ListFilterDTO {
+	    library?: boolean;
 	    status?: string;
 	    cursor?: string;
 	    limit?: number;
@@ -101,6 +102,7 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.library = source["library"];
 	        this.status = source["status"];
 	        this.cursor = source["cursor"];
 	        this.limit = source["limit"];

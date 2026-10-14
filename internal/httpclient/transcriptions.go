@@ -171,6 +171,9 @@ func (c *Client) Get(ctx context.Context, id string) (*domain.Transcription, err
 // query parameters, per docs/openapi.yaml's listTranscriptions parameters.
 func (c *Client) List(ctx context.Context, f domain.ListFilter) (domain.Page, error) {
 	q := url.Values{}
+	if f.Library {
+		q.Set("library", "true")
+	}
 	if f.Status != "" {
 		q.Set("status", string(f.Status))
 	}

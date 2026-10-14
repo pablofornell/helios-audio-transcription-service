@@ -177,3 +177,26 @@ filesystem volume, not a distributed object store — see `docs/ARCHITECTURE.md`
 - [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — for anyone operating it.
 - [`docs/openapi.yaml`](docs/openapi.yaml) — the HTTP API contract.
 - `make help` — every `make` target.
+
+## Shared queue, catalogue, and download behavior
+
+The queue shows running jobs first, then pending jobs in submission order.
+Library uses `library=true` to list stored source audio in that same active-first
+order, followed by terminal jobs ordered by completion time. Its cursor follows
+that ordering, including submillisecond timestamps. Loaded pages and open details
+continue updating while you browse or search.
+
+Uploaded audio remains downloadable for pending, running, failed, and canceled
+transcriptions. Transcript downloads require a successful job with a result.
+Individual audio and transcript downloads stream through the browser's download
+manager, with brief duplicate-click protection per URL; separate files can start
+independently. The existing elapsed processing timer remains in use because this
+service does not expose transcription progress percentages.
+
+Run `npm test`, `npm run build`, and `npm run test:web` in `desktop/frontend`.
+Playwright uses port 5188 by default; set `HELIOS_WEB_PORT` to choose another port.
+Install its browser once with `npx playwright install chromium`. Deterministic web
+fixtures cover ordering, source availability, and live detail updates. Set
+`HELIOS_WEB_API_URL=http://localhost:7462` to include actual audio/transcript
+streaming and pagination checks against an isolated validation backend containing
+45 completed transcripts and a canceled upload with stored audio.

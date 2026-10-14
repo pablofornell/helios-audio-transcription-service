@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "../../components";
 import {
   HeliosError,
+  getServerSettingsVersion,
+  useServerSettingsVersion,
   cancel as apiCancel,
   retry as apiRetry,
   submit as apiSubmit,
@@ -35,7 +37,7 @@ export type QueueRowModel =
   | { kind: "real"; key: string; transcription: Transcription };
 
 export interface UseTranscribeQueue {
-  /** Newest first — uploading placeholders (if any), then every non-dismissed known transcription. */
+  /** Upload placeholders and non-dismissed transcriptions; QueueList orders the sections. */
   rows: QueueRowModel[];
   /** True only for the very first load (mirrors `useTranscriptions()`'s own `loading`). */
   loading: boolean;
@@ -70,6 +72,13 @@ const ENTER_MS = 220;
 export function useTranscribeQueue(): UseTranscribeQueue {
   const { transcriptions, loading, error } = useTranscriptions();
   const toast = useToast();
+  const serverVersion = useServerSettingsVersion();
+  const mountedRef = useRef(false);
+  const entranceTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const pendingCancels = useRef(new Set<string>());
+  const pendingRetries = useRef(new Set<string>());
+
+  const isCurrent = useCallback((version: number) => mountedRef.current && version === getServerSettingsVersion(), []);
 
   const [uploading, setUploading] = useState<UploadEntry[]>([]);
   const [cancelingIds, setCancelingIds] = useState<Set<string>>(new Set());
@@ -79,6 +88,28 @@ export function useTranscribeQueue(): UseTranscribeQueue {
   const transcriptionsRef = useRef(transcriptions);
   const seenKeysRef = useRef<Set<string>>(new Set());
   const initializedRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      for (const timer of entranceTimers.current) clearTimeout(timer);
+      entranceTimers.current.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    for (const timer of entranceTimers.current) clearTimeout(timer);
+    entranceTimers.current.clear();
+    pendingCancels.current.clear();
+    pendingRetries.current.clear();
+    seenKeysRef.current.clear();
+    initializedRef.current = false;
+    setUploading([]);
+    setCancelingIds(new Set());
+    setEnteringKeys(new Set());
+    setDismissedIds(new Set());
+  }, [serverVersion]);
 
   useEffect(() => {
     transcriptionsRef.current = transcriptions;
@@ -108,8 +139,13 @@ export function useTranscribeQueue(): UseTranscribeQueue {
 
     if (newlyEntering.length) {
       setEnteringKeys((prev) => new Set([...prev, ...newlyEntering]));
+      const version = getServerSettingsVersion();
       for (const key of newlyEntering) {
-        setTimeout(() => setEnteringKeys((prev) => without(prev, key)), ENTER_MS);
+        const timer = setTimeout(() => {
+          entranceTimers.current.delete(timer);
+          if (isCurrent(version)) setEnteringKeys((prev) => without(prev, key));
+        }, ENTER_MS);
+        entranceTimers.current.add(timer);
       }
     }
 
@@ -141,47 +177,68 @@ export function useTranscribeQueue(): UseTranscribeQueue {
   }, [transcriptions, uploading, loading]);
 
   const submit = useCallback(async (source: AudioSource, options: Options): Promise<SubmitOutcome> => {
+    const version = getServerSettingsVersion();
     const key = crypto.randomUUID();
     const name = source.kind === "file" ? source.file.name : source.name;
     setUploading((prev) => [{ key, name }, ...prev]);
 
     try {
       const transcription = await apiSubmit(source, options);
-      seenKeysRef.current.add(transcription.id);
-      setUploading((prev) => prev.filter((e) => e.key !== key));
-      transcriptionStore.refreshNow();
+      if (isCurrent(version)) {
+        seenKeysRef.current.add(transcription.id);
+        setUploading((prev) => prev.filter((e) => e.key !== key));
+        transcriptionStore.refreshNow();
+      }
       return { ok: true, id: transcription.id };
     } catch (err) {
-      setUploading((prev) => prev.filter((e) => e.key !== key));
+      if (isCurrent(version)) setUploading((prev) => prev.filter((e) => e.key !== key));
       const heliosErr = err instanceof HeliosError ? err : new HeliosError("unknown", String(err));
       return { ok: false, error: heliosErr };
     }
-  }, []);
+  }, [isCurrent]);
 
   const cancel = useCallback(
     (id: string) => {
+      if (pendingCancels.current.has(id) || cancelingIds.has(id)) return;
+      const version = getServerSettingsVersion();
+      pendingCancels.current.add(id);
       setCancelingIds((prev) => new Set(prev).add(id));
       apiCancel(id)
-        .then(() => transcriptionStore.refreshNow())
+        .then(() => {
+          if (isCurrent(version)) transcriptionStore.refreshNow();
+        })
         .catch((err: unknown) => {
+          if (!isCurrent(version)) return;
           setCancelingIds((prev) => without(prev, id));
           const heliosErr = err instanceof HeliosError ? err : new HeliosError("unknown", String(err));
           toast.show({ message: `Couldn't cancel — ${heliosErr.message}` });
+        })
+        .finally(() => {
+          if (isCurrent(version)) pendingCancels.current.delete(id);
         });
     },
-    [toast.show],
+    [cancelingIds, isCurrent, toast.show],
   );
 
   const retry = useCallback(
     (id: string) => {
+      if (pendingRetries.current.has(id)) return;
+      const version = getServerSettingsVersion();
+      pendingRetries.current.add(id);
       apiRetry(id)
-        .then(() => transcriptionStore.refreshNow())
+        .then(() => {
+          if (isCurrent(version)) transcriptionStore.refreshNow();
+        })
         .catch((err: unknown) => {
+          if (!isCurrent(version)) return;
           const heliosErr = err instanceof HeliosError ? err : new HeliosError("unknown", String(err));
           toast.show({ message: `Couldn't retry — ${heliosErr.message}` });
+        })
+        .finally(() => {
+          if (isCurrent(version)) pendingRetries.current.delete(id);
         });
     },
-    [toast.show],
+    [isCurrent, toast.show],
   );
 
   const clearFinished = useCallback(() => {

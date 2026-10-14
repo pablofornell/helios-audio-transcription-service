@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useToast } from "../../components";
 import {
+  ACTIVE_POLL_MS,
+  IDLE_POLL_MS,
+  getServerSettingsVersion,
   deleteTranscription,
   get,
   HeliosError,
@@ -9,6 +12,7 @@ import {
   type Transcription,
   type TranscriptFormat,
 } from "../../lib";
+import { hasDownloadableTranscript } from "../../lib/contentEligibility";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import { DetailPanel } from "./DetailPanel";
 import { SaveAsDialog } from "./SaveAsDialog";
@@ -39,6 +43,41 @@ export function LibraryScreen({ openId }: LibraryScreenProps) {
   const [saveAsTarget, setSaveAsTarget] = useState<{ transcription: Transcription; format: TranscriptFormat } | undefined>(undefined);
   const [overlay, setOverlay] = useState(() => window.innerWidth < OVERLAY_BREAKPOINT);
   const consumedOpenIdRef = useRef<string | undefined>(undefined);
+  const deleteSessionRef = useRef(0);
+  const deletingSessionRef = useRef<number | undefined>(undefined);
+
+  const settingsVersion = useServerSettingsVersion();
+  const detailRequestRef = useRef(0);
+  const lifecycleRef = useRef(0);
+  useEffect(() => () => {
+    ++detailRequestRef.current;
+    ++lifecycleRef.current;
+    ++deleteSessionRef.current;
+    consumedOpenIdRef.current = undefined;
+  }, []);
+  const loadedDetail = query.loadedItems.find((item) => item.id === detail?.id);
+  useEffect(() => { if (loadedDetail) setDetail(loadedDetail); }, [loadedDetail]);
+
+  // A status filter may exclude the open job. Keep its detail live independently.
+  useEffect(() => {
+    if (!detail || loadedDetail) return;
+    const id = detail.id;
+    const requestId = detailRequestRef.current;
+    const server = getServerSettingsVersion();
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const run = async () => {
+      try {
+        const full = await get(id);
+        if (stopped || requestId !== detailRequestRef.current || server !== getServerSettingsVersion()) return;
+        setDetail((current) => current?.id === id ? full : current);
+      } catch { /* Keep the existing detail while a transient failure recovers. */ }
+      finally { if (!stopped) schedule(); }
+    };
+    const schedule = () => { timer = setTimeout(run, detail.status === "pending" || detail.status === "running" ? ACTIVE_POLL_MS : IDLE_POLL_MS); };
+    schedule();
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [detail?.id, detail?.status, loadedDetail, settingsVersion]);
 
   // Settings -> Server saving a new server: the open detail panel (if any)
   // still shows the old server's transcript, while `DetailPanel`'s own
@@ -49,11 +88,14 @@ export function LibraryScreen({ openId }: LibraryScreenProps) {
   // nothing worth keeping survives the switch. The ref comparison (not a
   // plain effect on `settingsVersion`) is what keeps this from clobbering
   // an `openId` hand-off that lands in the very same first render.
-  const settingsVersion = useServerSettingsVersion();
   const lastSettingsVersionRef = useRef(settingsVersion);
   useEffect(() => {
     if (settingsVersion === lastSettingsVersionRef.current) return;
     lastSettingsVersionRef.current = settingsVersion;
+    ++detailRequestRef.current;
+    ++lifecycleRef.current;
+    setSaveAsTarget(undefined);
+    closeDelete();
     setSelectedId(undefined);
     setDetail(undefined);
   }, [settingsVersion]);
@@ -76,50 +118,88 @@ export function LibraryScreen({ openId }: LibraryScreenProps) {
   }, [openId]);
 
   async function openDetail(id: string) {
+    const requestId = ++detailRequestRef.current;
+    const server = getServerSettingsVersion();
     setSelectedId(id);
+    setDetail(undefined);
     try {
       const full = await get(id);
+      if (requestId !== detailRequestRef.current || server !== getServerSettingsVersion()) return;
       setDetail(full);
     } catch (err) {
+      if (requestId !== detailRequestRef.current || server !== getServerSettingsVersion()) return;
       const heliosErr = err instanceof HeliosError ? err : new HeliosError("unknown", String(err));
       toast.show({ message: `Couldn't load details — ${heliosErr.message}` });
     }
   }
 
   function closeDetail() {
+    ++detailRequestRef.current;
+    setSelectedId(undefined);
     setDetail(undefined);
   }
 
   async function handleRetry(id: string) {
+    const requestId = lifecycleRef.current;
+    const server = getServerSettingsVersion();
     try {
       const updated = await retry(id);
+      if (requestId !== lifecycleRef.current || server !== getServerSettingsVersion()) return;
       query.updateItem(id, updated);
-      if (detail?.id === id) setDetail(updated);
+      setDetail((current) => current?.id === id ? updated : current);
     } catch (err) {
+      if (requestId !== lifecycleRef.current || server !== getServerSettingsVersion()) return;
       const heliosErr = err instanceof HeliosError ? err : new HeliosError("unknown", String(err));
       toast.show({ message: `Couldn't retry — ${heliosErr.message}` });
     }
   }
 
+  function openDelete(id: string) {
+    ++deleteSessionRef.current;
+    deletingSessionRef.current = undefined;
+    setDeleting(false);
+    setDeleteTarget(findById(id) ?? (detail?.id === id ? detail : undefined));
+  }
+
+  function closeDelete() {
+    ++deleteSessionRef.current;
+    deletingSessionRef.current = undefined;
+    setDeleteTarget(undefined);
+    setDeleting(false);
+  }
+
   async function confirmDelete() {
-    if (!deleteTarget) return;
+    const session = deleteSessionRef.current;
+    if (!deleteTarget || deletingSessionRef.current === session) return;
+    deletingSessionRef.current = session;
+    const id = deleteTarget.id;
+    const requestId = lifecycleRef.current;
+    const server = getServerSettingsVersion();
+    const sameServer = () => requestId === lifecycleRef.current && server === getServerSettingsVersion();
+    const sameDialog = () => sameServer() && session === deleteSessionRef.current;
     setDeleting(true);
     try {
-      await deleteTranscription(deleteTarget.id);
-      query.removeItem(deleteTarget.id);
-      if (detail?.id === deleteTarget.id) setDetail(undefined);
-      setDeleteTarget(undefined);
+      await deleteTranscription(id);
+      if (!sameServer()) return;
+      // A canceled dialog still completed the deletion on this server.
+      query.removeItem(id);
+      setDetail((current) => current?.id === id ? undefined : current);
+      if (sameDialog()) closeDelete();
     } catch (err) {
+      if (!sameDialog()) return;
       const heliosErr = err instanceof HeliosError ? err : new HeliosError("unknown", String(err));
       toast.show({ message: `Couldn't delete — ${heliosErr.message}` });
     } finally {
-      setDeleting(false);
+      if (sameDialog()) {
+        deletingSessionRef.current = undefined;
+        setDeleting(false);
+      }
     }
   }
 
   function openSaveAs(id: string, format: TranscriptFormat) {
     const transcription = detail?.id === id ? detail : query.items.find((i) => i.id === id);
-    if (transcription) setSaveAsTarget({ transcription, format });
+    if (transcription && hasDownloadableTranscript(transcription)) setSaveAsTarget({ transcription, format });
   }
 
   function findById(id: string): Transcription | undefined {
@@ -136,7 +216,7 @@ export function LibraryScreen({ openId }: LibraryScreenProps) {
           onOpenDetail={openDetail}
           onRetry={handleRetry}
           onSaveAs={(id) => openSaveAs(id, "txt")}
-          onDelete={(id) => setDeleteTarget(findById(id) ?? detail)}
+          onDelete={openDelete}
         />
       </div>
       {detail ? (
@@ -145,11 +225,11 @@ export function LibraryScreen({ openId }: LibraryScreenProps) {
           onClose={closeDetail}
           onRetry={handleRetry}
           onSaveAs={openSaveAs}
-          onDelete={(id) => setDeleteTarget(findById(id) ?? detail)}
+          onDelete={openDelete}
           overlay={overlay}
         />
       ) : null}
-      <DeleteConfirmDialog transcription={deleteTarget} busy={deleting} onCancel={() => setDeleteTarget(undefined)} onConfirm={confirmDelete} />
+      <DeleteConfirmDialog transcription={deleteTarget} busy={deleting} onCancel={closeDelete} onConfirm={confirmDelete} />
       <SaveAsDialog
         transcription={saveAsTarget?.transcription}
         initialFormat={saveAsTarget?.format ?? "txt"}

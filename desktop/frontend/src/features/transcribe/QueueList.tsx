@@ -22,9 +22,30 @@ export interface QueueListProps {
 
 const SKELETON_ROWS = 3;
 
-/** The rows a keyboard user can actually land on — uploading placeholders are skipped since they carry no id yet. */
-function realRows(rows: QueueRowModel[]): Extract<QueueRowModel, { kind: "real" }>[] {
-  return rows.filter((r): r is Extract<QueueRowModel, { kind: "real" }> => r.kind === "real");
+type RealQueueRow = Extract<QueueRowModel, { kind: "real" }>;
+
+// Date.parse drops sub-millisecond precision. Keep the fractional tail so
+// submissions within the same millisecond still follow server FIFO order.
+function compareTimestamps(a: string, b: string): number {
+  const milliseconds = Date.parse(a) - Date.parse(b);
+  if (milliseconds) return milliseconds;
+  const fraction = (value: string) => (value.match(/\.(\d+)/)?.[1] ?? "").padEnd(9, "0");
+  return fraction(a).localeCompare(fraction(b));
+}
+
+/** Running first, pending in submission order, then upload placeholders. */
+function queueSections(rows: QueueRowModel[]) {
+  const real = rows.filter((row): row is RealQueueRow => row.kind === "real");
+  const oldestFirst = (a: RealQueueRow, b: RealQueueRow) =>
+    compareTimestamps(a.transcription.createdAt, b.transcription.createdAt) || a.key.localeCompare(b.key);
+  const running = real.filter((row) => row.transcription.status === "running").sort(oldestFirst);
+  const pending = real.filter((row) => row.transcription.status === "pending").sort(oldestFirst);
+  const uploading = rows.filter((row) => row.kind === "uploading").reverse();
+  const recentRows = real.filter((row) => isTerminalStatus(row.transcription.status)).sort((a, b) =>
+    compareTimestamps(b.transcription.completedAt || b.transcription.createdAt, a.transcription.completedAt || a.transcription.createdAt)
+    || a.key.localeCompare(b.key),
+  );
+  return { activeRows: [...running, ...pending, ...uploading], recentRows };
 }
 
 /**
@@ -68,8 +89,7 @@ export function QueueList({
 
   if (rows.length === 0) return null;
 
-  const activeRows = rows.filter((r) => r.kind === "uploading" || !isTerminalStatus(r.transcription.status));
-  const recentRows = realRows(rows).filter((r) => isTerminalStatus(r.transcription.status));
+  const { activeRows, recentRows } = queueSections(rows);
 
   const runningCount = activeRows.filter((r) => r.kind === "real" && r.transcription.status === "running").length;
   const queuedCount = activeRows.length - runningCount;

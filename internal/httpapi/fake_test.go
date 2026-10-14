@@ -589,13 +589,14 @@ func TestListTranscriptions_FiltersAndBadLimit(t *testing.T) {
 	}
 	r := httpapi.NewRouter(testDeps(svc, observability.NewRegistry(), false))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/transcriptions?status=succeeded&cursor=abc&limit=5", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/transcriptions?library=true&status=succeeded&cursor=abc&limit=5", nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, domain.StatusSucceeded, captured.Status)
 	assert.Equal(t, "abc", captured.Cursor)
 	assert.Equal(t, 5, captured.Limit)
+	assert.True(t, captured.Library)
 
 	var body struct {
 		Items      []map[string]any `json:"items"`
@@ -604,6 +605,12 @@ func TestListTranscriptions_FiltersAndBadLimit(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&body))
 	assert.Equal(t, "next-cursor", body.NextCursor)
 	assert.Len(t, body.Items, 1)
+
+	for _, query := range []string{"library=", "library=1", "library=yes", "library=true&library=false"} {
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/transcriptions?"+query, nil))
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	}
 
 	// A non-numeric limit is invalid_input.
 	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/transcriptions?limit=not-a-number", nil)

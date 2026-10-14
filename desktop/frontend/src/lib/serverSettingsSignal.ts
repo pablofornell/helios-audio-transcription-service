@@ -30,11 +30,12 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-function getSnapshot(): number {
+/** Synchronous version check for async action completions, before React rerenders. */
+export function getServerSettingsVersion(): number {
   return version;
 }
 
 /** Changes every time `setServerSettings` succeeds, Wails or browser adapter alike — include it in a `useEffect`'s dependency array to re-run that effect after the server changes, even when nothing else about it (e.g. a `transcription.id`) did. */
 export function useServerSettingsVersion(): number {
-  return useSyncExternalStore(subscribe, getSnapshot);
+  return useSyncExternalStore(subscribe, getServerSettingsVersion);
 }

@@ -7,7 +7,7 @@ export function buildLibraryMeta(transcription: Transcription): string {
   segments.push(transcription.options.model || "default model");
   segments.push(transcription.options.language || "auto-detect");
   segments.push(formatDuration(transcription.audio.durationSeconds));
-  segments.push(formatRelative(transcription.createdAt));
+  segments.push(formatRelative(transcription.completedAt ?? transcription.createdAt));
   return segments.join(" · ");
 }
 
@@ -45,4 +45,19 @@ export function matchesSearch(transcription: Transcription, search: string): boo
 
 export function isKnownStatus(value: string): value is Status {
   return value === "pending" || value === "running" || value === "succeeded" || value === "failed" || value === "canceled";
+}
+
+/** Match server order, retaining submillisecond timestamp precision. */
+export function compareLibraryItems(a: Transcription, b: Transcription): number {
+  const rank = (t: Transcription) => t.status === "running" ? 0 : t.status === "pending" ? 1 : 2;
+  const ar = rank(a), br = rank(b);
+  if (ar !== br) return ar - br;
+  const timestamp = (t: Transcription) => {
+    const raw = ar < 2 ? t.createdAt : t.completedAt ?? t.createdAt;
+    const fraction = /\.(\d+)/.exec(raw)?.[1] ?? "";
+    return BigInt(Date.parse(raw)) * 1000000n + BigInt(fraction.padEnd(9, "0").slice(3, 9) || "0");
+  };
+  const at = timestamp(a), bt = timestamp(b);
+  if (at !== bt) return (at < bt ? -1 : 1) * (ar === 2 ? -1 : 1);
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }

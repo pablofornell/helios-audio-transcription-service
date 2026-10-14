@@ -113,7 +113,7 @@ describe("list", () => {
   it("encodes status, limit and cursor as query params", async () => {
     fetchMock.mockResolvedValue(jsonResponse(200, { items: [], nextCursor: "abc" }));
 
-    await api.list({ status: "running", limit: 50, cursor: "page2" });
+    await api.list({ library: true, status: "running", limit: 50, cursor: "page2" });
 
     const [path] = fetchMock.mock.calls[0] as [string];
     const url = new URL(path, "http://localhost");
@@ -121,6 +121,7 @@ describe("list", () => {
     expect(url.searchParams.get("status")).toBe("running");
     expect(url.searchParams.get("limit")).toBe("50");
     expect(url.searchParams.get("cursor")).toBe("page2");
+    expect(url.searchParams.get("library")).toBe("true");
   });
 
   it("sends no query string at all for an empty filter", async () => {
@@ -373,7 +374,7 @@ describe("DetailPanel's <audio> src follows the effective server", () => {
 // it renders a plain download link instead. Same "no fake Wails runtime"
 // premise as the describe block above.
 describe("DetailPanel's MediaActions in a browser tab", () => {
-  it("renders a 'Download audio' link at audioDownloadUrl instead of Open/Reveal buttons", async () => {
+  it("launches native audio download with shared request feedback", async () => {
     const transcription = makeWireTranscription({ id: "detail-dl-1" });
     const { container } = render(
       createElement(DetailPanel, {
@@ -386,18 +387,15 @@ describe("DetailPanel's MediaActions in a browser tab", () => {
       }),
     );
 
-    await waitFor(() => expect(container.querySelector("a[download]")).not.toBeNull());
-    const link = container.querySelector("a[download]") as HTMLAnchorElement;
-    expect(link.getAttribute("href")).toBe(api.audioDownloadUrl("detail-dl-1"));
-    expect(link.textContent).toBe("Download audio");
+    await waitFor(() => expect(container.textContent).toContain("Download audio"));
+    const button = Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Download audio")!;
+    let anchor!: HTMLAnchorElement;
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { anchor = this; });
+    await act(async () => button.click());
+    expect(anchor.getAttribute("href")).toBe(api.audioDownloadUrl("detail-dl-1"));
+    expect(anchor.getAttribute("target")).toBeNull();
+    expect(container.textContent).toContain("Download requested…");
     expect(container.textContent).not.toMatch(/Open|Reveal in file manager/);
-    // A saved, cross-origin server ignores `download` entirely, so a
-    // non-attachment response (audio swept by retention, transcription
-    // deleted elsewhere, server unreachable) would otherwise replace this
-    // whole SPA tab — `target="_blank"` sends that failure to a throwaway
-    // tab instead (see `MediaActions`'s own doc).
-    expect(link.getAttribute("target")).toBe("_blank");
-    expect(link.getAttribute("rel")).toBe("noopener");
   });
 });
 

@@ -32,3 +32,8 @@ desktop/build/
 .vscode/
 *.swp
 .DS_Store
+
+# Browser verification artifacts
+.playwright-cli/
+desktop/frontend/test-results/
+desktop/frontend/playwright-report/

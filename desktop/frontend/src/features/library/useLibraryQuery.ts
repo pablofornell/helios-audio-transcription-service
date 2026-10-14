@@ -1,21 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  ACTIVE_POLL_MS,
-  HeliosError,
-  IDLE_POLL_MS,
-  list,
-  useServerSettingsVersion,
-  type ListFilter,
-  type Status,
-  type Transcription,
-} from "../../lib";
-import { matchesSearch, type StatusFilterValue } from "./helpers";
+import { ACTIVE_POLL_MS, IDLE_POLL_MS, HeliosError, get, list, getServerSettingsVersion, useServerSettingsVersion, type Transcription, type Status } from "../../lib";
+import { hasStoredAudio } from "../../lib/contentEligibility";
+import { compareLibraryItems, matchesSearch, type StatusFilterValue } from "./helpers";
 
 const PAGE_SIZE = 40;
 
 export interface UseLibraryQueryResult {
   /** Loaded items, client-side searched — what the list should render. */
   items: Transcription[];
+  /** Loaded records before filename search, for the open detail panel. */
+  loadedItems: Transcription[];
   loading: boolean;
   loadingMore: boolean;
   error?: HeliosError;
@@ -30,192 +24,134 @@ export interface UseLibraryQueryResult {
   removeItem: (id: string) => void;
 }
 
-/**
- * Library's own data source: cursor-paginated, filtered by the single
- * `status` query param docs/openapi.yaml's `GET /transcriptions` supports,
- * searched client-side by filename. Deliberately independent of
- * `lib/store.ts`'s `useTranscriptions()` — that store is a single
- * unfiltered, unpaginated (well, up to 200) page; Library's own filtered,
- * paginated view calls `list()` directly instead.
- */
+/** Library uses the server's stored-audio ordering and keeps loaded pages live. */
 export function useLibraryQuery(): UseLibraryQueryResult {
-  const [status, setStatus] = useState<StatusFilterValue | undefined>(undefined);
+  const [status, setStatus] = useState<StatusFilterValue>();
   const [search, setSearch] = useState("");
-
   const [items, setItems] = useState<Transcription[]>([]);
-  const [cursor, setCursor] = useState<string | undefined>(undefined);
+  const [cursor, setCursor] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState<HeliosError | undefined>(undefined);
+  const [error, setError] = useState<HeliosError>();
   const [hasMore, setHasMore] = useState(false);
-
-  // Guards against a slow, superseded request (filters changed again while
-  // it was in flight) clobbering a newer one's result.
-  const requestIdRef = useRef(0);
-  // True once the user has loaded a second page; see the polling effect.
-  const pagedRef = useRef(false);
-
-
-  const apiFilter: ListFilter = useMemo(() => ({ status: status as Status | undefined, limit: PAGE_SIZE }), [status]);
-
-  const fetchFirstPage = useCallback(() => {
-    pagedRef.current = false;
-    const requestId = ++requestIdRef.current;
+  const generation = useRef(0);
+  const paging = useRef(false);
+  const paged = useRef(false);
+  const loaded = useRef(items);
+  loaded.current = items;
+  const settingsVersion = useServerSettingsVersion();
+  const filter = useMemo(() => ({ library: true, limit: PAGE_SIZE, status: status as Status | undefined }), [status]);
+  const eligible = useCallback((item: Transcription) => hasStoredAudio(item) && (!filter.status || item.status === filter.status), [filter]);
+  const currentEligibility = useRef(eligible);
+  currentEligibility.current = eligible;
+  const invalidate = useCallback(() => {
+    ++generation.current;
+    paging.current = false;
+    setLoadingMore(false);
+  }, []);
+  const refresh = useCallback(() => {
+    invalidate();
+    paged.current = false;
+    const token = generation.current;
+    const server = getServerSettingsVersion();
     setLoading(true);
     setError(undefined);
-    list(apiFilter)
-      .then((page) => {
-        if (requestId !== requestIdRef.current) return;
-        setItems(page.items);
-        setCursor(page.nextCursor);
-        setHasMore(Boolean(page.nextCursor));
-        setLoading(false);
-      })
-      .catch((err: unknown) => {
-        if (requestId !== requestIdRef.current) return;
-        setError(err instanceof HeliosError ? err : new HeliosError("unknown", String(err)));
-        setLoading(false);
-      });
-  }, [apiFilter]);
-
-  useEffect(() => {
-    fetchFirstPage();
-  }, [fetchFirstPage]);
-
-  // Settings -> Server saving a new server: this view calls `list()`
-  // directly (see this module's own doc), so unlike `lib/store.ts`'s
-  // `transcriptionStore` it never hears about the change on its own.
-  // `settingsVersion` only changes after a save actually took effect, and
-  // the ref comparison (not just "did the effect run") is what keeps this
-  // from re-fetching on mount, when it is already equal to the version this
-  // hook first rendered with. Old rows are cleared up front rather than
-  // left showing under the loading state -- they describe a server that is
-  // no longer the effective one. `fetchFirstPage` itself resets
-  // `pagedRef` and bumps `requestIdRef`, so paging stands down and an
-  // old-server response already in flight is discarded the same way a
-  // filter change discards one.
-  const settingsVersion = useServerSettingsVersion();
-  const lastSettingsVersionRef = useRef(settingsVersion);
-  useEffect(() => {
-    if (settingsVersion === lastSettingsVersionRef.current) return;
-    lastSettingsVersionRef.current = settingsVersion;
     setItems([]);
     setCursor(undefined);
     setHasMore(false);
-    fetchFirstPage();
-  }, [settingsVersion, fetchFirstPage]);
+    list(filter).then((page) => {
+      if (token !== generation.current || server !== getServerSettingsVersion()) return;
+      setItems(page.items.filter(eligible).sort(compareLibraryItems));
+      setCursor(page.nextCursor);
+      setHasMore(Boolean(page.nextCursor));
+    }).catch((err: unknown) => {
+      if (token === generation.current && server === getServerSettingsVersion()) setError(err instanceof HeliosError ? err : new HeliosError("unknown", String(err)));
+    }).finally(() => {
+      if (token === generation.current && server === getServerSettingsVersion()) setLoading(false);
+    });
+  }, [eligible, filter, invalidate]);
+  useEffect(() => {
+    refresh();
+    return () => { ++generation.current; };
+  }, [refresh, settingsVersion]);
 
-  // Derived, not read from a ref: the effect must re-subscribe when this
-  // flips so a job that only just started is polled at the fast cadence
-  // immediately, rather than waiting out the idle timer that was already
-  // scheduled when nothing was running.
-  const hasActiveJob = useMemo(
-    () => items.some((i) => i.status === "pending" || i.status === "running"),
-    [items],
-  );
-
-  // Keep the library live. The sibling service could leave this view alone
-  // because its SSE stream pushed every change; this service has no such
-  // endpoint, so without polling the library is a snapshot frozen at mount
-  // -- submit a file, come back, and a finished job is still shown as
-  // running (or missing entirely). It refreshes on the same cadence as
-  // lib/store.ts, fast while anything is in flight and slow when nothing
-  // is.
-  //
-  // Two things it deliberately does NOT do: it never touches `loading` (a
-  // background refresh must not flash the skeleton over a list the user is
-  // reading), and it stands down entirely once the user has paged past the
-  // first page, because replacing `items` with page one would silently
-  // yank the rest out from under them. Paging is a deliberate act; it wins
-  // until the next explicit refresh or filter change.
+  const hasActiveJob = items.some((item) => item.status === "running" || item.status === "pending");
   useEffect(() => {
     let stopped = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    const schedule = () => {
-      timer = setTimeout(run, hasActiveJob ? ACTIVE_POLL_MS : IDLE_POLL_MS);
-    };
-
-    const run = () => {
-      if (stopped || pagedRef.current) {
-        if (!stopped) schedule();
-        return;
-      }
-      const requestId = ++requestIdRef.current;
-      list(apiFilter)
-        .then((page) => {
-          if (stopped || requestId !== requestIdRef.current) return;
-          setItems(page.items);
+    let timer: ReturnType<typeof setTimeout>;
+    const schedule = () => { timer = setTimeout(run, hasActiveJob ? ACTIVE_POLL_MS : IDLE_POLL_MS); };
+    const run = async () => {
+      if (stopped) return;
+      if (paging.current || loading) { schedule(); return; }
+      const token = generation.current;
+      const server = getServerSettingsVersion();
+      const previous = loaded.current;
+      try {
+        const page = await list(filter);
+        const firstIds = new Set(page.items.map((item) => item.id));
+        const older = paged.current ? previous.filter((item) => !firstIds.has(item.id)) : [];
+        const updated: Transcription[] = [];
+        // Bound concurrent requests while retaining every loaded record.
+        for (let start = 0; start < older.length; start += 8) {
+          if (stopped || token !== generation.current || server !== getServerSettingsVersion()) return;
+          const batch = await Promise.all(older.slice(start, start + 8).map(async (item) => {
+            try { return await get(item.id); }
+            catch (err) {
+              if (err instanceof HeliosError && err.code === "not_found") return undefined;
+              throw err;
+            }
+          }));
+          updated.push(...batch.filter((item): item is Transcription => item !== undefined));
+        }
+        if (stopped || token !== generation.current || server !== getServerSettingsVersion()) return;
+        const merged = new Map([...updated, ...page.items].map((item) => [item.id, item]));
+        setItems([...merged.values()].filter(eligible).sort(compareLibraryItems));
+        if (!paged.current) {
           setCursor(page.nextCursor);
           setHasMore(Boolean(page.nextCursor));
-          setError(undefined);
-        })
-        .catch(() => {
-          // Swallowed on purpose: a failed background poll must not
-          // replace a readable list with an error screen. ConnectionBar
-          // already reports an unreachable server, and the next tick
-          // recovers on its own.
-        })
-        .finally(() => {
-          if (!stopped) schedule();
-        });
+        }
+        setError(undefined);
+      } catch { /* A background failure leaves the readable list intact. */ }
+      finally { if (!stopped) schedule(); }
     };
-
     schedule();
-    return () => {
-      stopped = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [apiFilter, hasActiveJob]);
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [eligible, filter, hasActiveJob, loading, settingsVersion]);
 
   const loadMore = useCallback(() => {
-    if (loadingMore || !hasMore || !cursor) return;
-    // Past the first page, the background refresh below stands down -- see
-    // pagedRef.
-    pagedRef.current = true;
-    const requestId = requestIdRef.current;
+    if (loading || paging.current || !hasMore || !cursor) return;
+    invalidate();
+    const token = generation.current;
+    const server = getServerSettingsVersion();
+    paging.current = true;
+    paged.current = true;
     setLoadingMore(true);
-    list({ ...apiFilter, cursor })
-      .then((page) => {
-        if (requestId !== requestIdRef.current) return;
-        setItems((prev) => {
-          const seen = new Set(prev.map((i) => i.id));
-          return [...prev, ...page.items.filter((i) => !seen.has(i.id))];
-        });
-        setCursor(page.nextCursor);
-        setHasMore(Boolean(page.nextCursor));
-        setLoadingMore(false);
-      })
-      .catch((err: unknown) => {
-        if (requestId !== requestIdRef.current) return;
-        setError(err instanceof HeliosError ? err : new HeliosError("unknown", String(err)));
-        setLoadingMore(false);
+    list({ ...filter, cursor }).then((page) => {
+      if (token !== generation.current || server !== getServerSettingsVersion()) return;
+      setItems((previous) => {
+        const merged = new Map([...page.items, ...previous].map((item) => [item.id, item]));
+        return [...merged.values()].filter(eligible).sort(compareLibraryItems);
       });
-  }, [apiFilter, cursor, hasMore, loadingMore]);
-
+      setCursor(page.nextCursor);
+      setHasMore(Boolean(page.nextCursor));
+    }).catch((err: unknown) => {
+      if (token === generation.current && server === getServerSettingsVersion()) setError(err instanceof HeliosError ? err : new HeliosError("unknown", String(err)));
+    }).finally(() => {
+      if (token !== generation.current || server !== getServerSettingsVersion()) return;
+      paging.current = false;
+      setLoadingMore(false);
+    });
+  }, [loading, hasMore, cursor, filter, eligible, invalidate]);
   const updateItem = useCallback((id: string, patch: Partial<Transcription>) => {
-    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
-  }, []);
-
+    if (!loaded.current.some((item) => item.id === id)) return;
+    invalidate();
+    setItems((previous) => previous.map((item) => item.id === id ? { ...item, ...patch } : item).filter(currentEligibility.current).sort(compareLibraryItems));
+  }, [invalidate]);
   const removeItem = useCallback((id: string) => {
-    setItems((prev) => prev.filter((i) => i.id !== id));
-  }, []);
-
-  const searched = useMemo(() => items.filter((i) => matchesSearch(i, search)), [items, search]);
-
-  return {
-    items: searched,
-    loading,
-    loadingMore,
-    error,
-    hasMore,
-    status,
-    setStatus,
-    search,
-    setSearch,
-    loadMore,
-    refresh: fetchFirstPage,
-    updateItem,
-    removeItem,
-  };
+    if (!loaded.current.some((item) => item.id === id)) return;
+    invalidate();
+    setItems((previous) => previous.filter((item) => item.id !== id));
+  }, [invalidate]);
+  const searched = useMemo(() => items.filter((item) => matchesSearch(item, search)), [items, search]);
+  return { items: searched, loadedItems: items, loading, loadingMore, error, hasMore, status, setStatus, search, setSearch, loadMore, refresh, updateItem, removeItem };
 }

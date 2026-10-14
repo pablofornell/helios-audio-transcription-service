@@ -163,7 +163,22 @@ paths:
       tags: [transcriptions]
       operationId: listTranscriptions
       summary: List transcriptions, most recently created first.
+      description: >
+        The default ordering and cursor format remain unchanged. With library=true,
+        only rows with stored source audio are included (positive sizeBytes, nonempty
+        filename and source path). Running jobs precede pending jobs, each oldest-created
+        first; terminal jobs follow, most recently completed first, falling back to
+        createdAt. IDs ascending break equal timestamps. Timestamp precision is
+        preserved in keyset cursors. Library and default cursors cannot be mixed.
+        Status filters apply in either mode. Audio remains available across statuses;
+        transcript export requires succeeded and a nonnull result.
       parameters:
+        - name: library
+          in: query
+          description: Opt into the stored-audio Library ordering. Only true or false is accepted.
+          schema:
+            type: boolean
+            default: false
         - name: status
           in: query
           description: Restrict the listing to one Status. Omitted means every status.
@@ -188,7 +203,8 @@ paths:
         "400":
           description: >
             `limit` is not a valid integer, `status` is not a recognised Status value,
-            or `cursor` is not a token this server issued. ErrorCode invalid_input.
+            `library` is not true or false, or `cursor` is malformed or belongs to
+            another listing mode. ErrorCode invalid_input.
           content:
             application/json:
               schema:

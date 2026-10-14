@@ -15,11 +15,14 @@ package domain
 // ListFilter narrows and pages a listing of transcriptions. The zero value
 // is a valid request for the first page of everything.
 type ListFilter struct {
+	// Library includes stored audio only, with active FIFO before recent completions.
+	// Its cursors cannot be used with the default newest-created listing.
+	Library bool
 	// Status, when non-empty, restricts the listing to one status.
 	Status Status
 	// Cursor is an opaque keyset cursor returned by a previous listing.
-	// Empty means "start at the newest". It is deliberately opaque -- it
-	// encodes (created_at, id) -- and callers must not construct one.
+	// Empty starts at the first row for the selected mode. Cursors are
+	// deliberately opaque and callers must not construct or mix modes.
 	Cursor string
 	// Limit is the maximum number of items to return. Zero or negative
 	// means the default; anything above the maximum is clamped rather than

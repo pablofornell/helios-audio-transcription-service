@@ -1,6 +1,6 @@
-import { useRef, useState, type DragEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import { EmptyState, Segmented, Select, Switch } from "../../components";
-import { chooseAudioFile, type AudioSource, type Options, type Task } from "../../lib";
+import { chooseAudioFile, getServerSettingsVersion, useServerSettingsVersion, type AudioSource, type Options, type Task } from "../../lib";
 import { hasWailsRuntime } from "../../lib/runtime";
 import { useComposerOptions } from "./useComposerOptions";
 import type { SubmitOutcome } from "./useTranscribeQueue";
@@ -85,17 +85,39 @@ export function Composer({ variant, submit }: ComposerProps) {
   const [submitError, setSubmitError] = useState<string | undefined>(undefined);
   const [dragOver, setDragOver] = useState(false);
 
+  const serverVersion = useServerSettingsVersion();
+  const mountedRef = useRef(false);
+  const submittingRef = useRef(false);
+  const choosingRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    submittingRef.current = false;
+    setSubmitting(false);
+    setSubmitError(undefined);
+  }, [serverVersion]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function doSubmit(source: AudioSource) {
-    if (submitting) return;
+    if (!mountedRef.current || submittingRef.current) return;
+    const version = getServerSettingsVersion();
+    const isCurrent = () => mountedRef.current && version === getServerSettingsVersion();
+    submittingRef.current = true;
     setSubmitError(undefined);
     setSubmitting(true);
     try {
       const outcome = await submit(source, options);
-      if (!outcome.ok) setSubmitError(outcome.error.message);
+      if (isCurrent() && !outcome.ok) setSubmitError(outcome.error.message);
     } finally {
-      setSubmitting(false);
+      if (isCurrent()) {
+        submittingRef.current = false;
+        setSubmitting(false);
+      }
     }
   }
 
@@ -109,11 +131,17 @@ export function Composer({ variant, submit }: ComposerProps) {
    */
   async function pickFile() {
     if (hasWailsRuntime()) {
+      if (!mountedRef.current || choosingRef.current) return;
+      const version = getServerSettingsVersion();
+      const isCurrent = () => mountedRef.current && version === getServerSettingsVersion();
+      choosingRef.current = true;
       try {
         const path = await chooseAudioFile();
-        if (path) void doSubmit({ kind: "path", path, name: basename(path) });
+        if (isCurrent() && path) void doSubmit({ kind: "path", path, name: basename(path) });
       } catch (err) {
-        setSubmitError(err instanceof Error ? err.message : "Couldn't open the file dialog");
+        if (isCurrent()) setSubmitError(err instanceof Error ? err.message : "Couldn't open the file dialog");
+      } finally {
+        choosingRef.current = false;
       }
       return;
     }

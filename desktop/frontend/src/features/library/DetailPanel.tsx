@@ -18,6 +18,9 @@ import {
   type TranscriptFormat,
 } from "../../lib";
 import { audioDownloadUrl } from "../../lib/browser/api";
+import { triggerBrowserDownloadFromClick, useBrowserDownloadBusy } from "../../lib/browser/download";
+import { hasDownloadableTranscript, hasStoredAudio } from "../../lib/contentEligibility";
+import { getServerSettingsVersion } from "../../lib/serverSettingsSignal";
 import { hasWailsRuntime } from "../../lib/runtime";
 import { errorCopyFor } from "../transcribe/errorCopy";
 import { isWithinOwnedWidget } from "./helpers";
@@ -61,6 +64,19 @@ export function DetailPanel({ transcription, onClose, onRetry, onSaveAs, onDelet
   // leaving the player pointed at whatever server was effective when this
   // panel was first opened for this transcription).
   const settingsVersion = useServerSettingsVersion();
+  const mediaSessionRef = useRef({ id: transcription.id, settingsVersion, active: true, opening: false, revealing: false });
+  if (mediaSessionRef.current.id !== transcription.id || mediaSessionRef.current.settingsVersion !== settingsVersion) {
+    mediaSessionRef.current.active = false;
+    mediaSessionRef.current = { id: transcription.id, settingsVersion, active: true, opening: false, revealing: false };
+  }
+  const mediaSession = mediaSessionRef.current;
+  const currentMediaSession = () => mediaSessionRef.current === mediaSession && mediaSession.active && mediaSession.settingsVersion === getServerSettingsVersion();
+  useEffect(() => {
+    mediaSession.active = true;
+    setOpening(false);
+    setRevealing(false);
+    return () => { mediaSession.active = false; };
+  }, [mediaSession]);
 
   useEffect(() => {
     let cancelled = false;
@@ -78,7 +94,7 @@ export function DetailPanel({ transcription, onClose, onRetry, onSaveAs, onDelet
     return () => {
       cancelled = true;
     };
-  }, [transcription.id]);
+  }, [transcription.id, settingsVersion]);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,8 +111,7 @@ export function DetailPanel({ transcription, onClose, onRetry, onSaveAs, onDelet
   }, [settingsVersion]);
 
   useEffect(() => {
-    if (transcription.status !== "succeeded") return;
-    if (content[format] !== undefined) return;
+    if (!hasDownloadableTranscript(transcription)) return;
     let cancelled = false;
     setContentLoading(true);
     setContentError(undefined);
@@ -116,7 +131,7 @@ export function DetailPanel({ transcription, onClose, onRetry, onSaveAs, onDelet
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transcription.id, transcription.status, format]);
+  }, [transcription.id, transcription.status, transcription.result, format, settingsVersion]);
 
   useEffect(() => {
     panelRef.current?.focus();
@@ -136,6 +151,7 @@ export function DetailPanel({ transcription, onClose, onRetry, onSaveAs, onDelet
   const errorCopy = transcription.status === "failed" ? errorCopyFor(transcription.error?.code) : undefined;
   const result = transcription.result;
   const segmentsAvailable = Boolean(result && result.segments.length > 0 && transcription.options.wordTimestamps);
+  const storedAudio = hasStoredAudio(transcription);
   const audioSrc = `${serverBase}/api/v1/transcriptions/${transcription.id}/audio`;
 
   async function copyText(label: string, text: string) {
@@ -148,9 +164,12 @@ export function DetailPanel({ transcription, onClose, onRetry, onSaveAs, onDelet
   }
 
   async function handleOpen() {
+    if (!currentMediaSession() || mediaSession.opening) return;
+    mediaSession.opening = true;
     setOpening(true);
     try {
-      await openAudio(transcription.id);
+      await openAudio(mediaSession.id);
+      if (!currentMediaSession()) return;
       // OpenAudio downloads and caches the file first when it wasn't
       // already local (desktop/reveal.go's ensureLocalAudio) — a
       // successful call means it is now cached, so the button's own label
@@ -158,23 +177,30 @@ export function DetailPanel({ transcription, onClose, onRetry, onSaveAs, onDelet
       // AudioLocation round trip.
       setMediaLoc((prev) => (prev ? { ...prev, exists: true } : prev));
     } catch (err) {
+      if (!currentMediaSession()) return;
       const helios = err instanceof HeliosError ? err : new HeliosError("unknown", String(err));
       toast.show({ message: helios.code === "media_unavailable" ? "Opening a file isn't available from a browser tab." : helios.message });
     } finally {
-      setOpening(false);
+      mediaSession.opening = false;
+      if (currentMediaSession()) setOpening(false);
     }
   }
 
   async function handleReveal() {
+    if (!currentMediaSession() || mediaSession.revealing) return;
+    mediaSession.revealing = true;
     setRevealing(true);
     try {
-      await revealInFileManager(transcription.id);
+      await revealInFileManager(mediaSession.id);
+      if (!currentMediaSession()) return;
       setMediaLoc((prev) => (prev ? { ...prev, exists: true } : prev));
     } catch (err) {
+      if (!currentMediaSession()) return;
       const helios = err instanceof HeliosError ? err : new HeliosError("unknown", String(err));
       toast.show({ message: helios.code === "media_unavailable" ? "Revealing a file isn't available from a browser tab." : helios.message });
     } finally {
-      setRevealing(false);
+      mediaSession.revealing = false;
+      if (currentMediaSession()) setRevealing(false);
     }
   }
 
@@ -298,17 +324,21 @@ export function DetailPanel({ transcription, onClose, onRetry, onSaveAs, onDelet
 
           <hr className={styles.hr} />
           <h3 className={styles.sectionHeading}>Source audio</h3>
-          <audio ref={audioRef} className={styles.audioPlayer} src={audioSrc} controls preload="none" />
-          <MediaActions
-            location={mediaLoc}
-            opening={opening}
-            revealing={revealing}
-            onOpen={handleOpen}
-            onReveal={handleReveal}
-            downloadHref={audioDownloadUrl(transcription.id)}
-          />
+          {storedAudio ? (
+            <>
+              <audio ref={audioRef} className={styles.audioPlayer} src={audioSrc} controls preload="none" />
+              <MediaActions
+                location={mediaLoc}
+                opening={opening}
+                revealing={revealing}
+                onOpen={handleOpen}
+                onReveal={handleReveal}
+                downloadHref={audioDownloadUrl(transcription.id)}
+              />
+            </>
+          ) : <p className={styles.anomaly}>Source audio is unavailable.</p>}
 
-          {transcription.status === "succeeded" && result ? (
+          {hasDownloadableTranscript(transcription) && result ? (
             <>
               <hr className={styles.hr} />
               <div className={styles.transcriptHeader}>
@@ -408,35 +438,8 @@ interface MediaActionsProps {
   downloadHref: string;
 }
 
-/**
- * Desktop (`hasWailsRuntime()`): Open/Reveal are always offered (never
- * gated on `AudioLocation.exists`): `app.App.OpenAudio`/
- * `RevealInFileManager` transparently download and cache the source audio
- * first if this process does not already hold a local copy (see
- * `desktop/reveal.go`'s own doc — unlike the sibling ingestion project,
- * this remote-only client never has direct filesystem access to the
- * server's storage at all). `location.exists` only changes the label, so a
- * first click that will trigger a download reads differently from one
- * that opens instantly.
- *
- * Browser tab: neither action has any equivalent at all (a web page can
- * neither ask the OS to open a file with its default handler nor open the
- * host OS's file manager — `../../lib/browser/api.ts`'s `openAudio`/
- * `revealInFileManager` always reject `"media_unavailable"`), so this
- * renders a plain `<a download>` at `downloadHref` instead — the browser's
- * own download manager is the equivalent capability here, the same as
- * `SaveAsDialog`'s browser-tab transcript download. `target="_blank"` (plus
- * `rel="noopener"`) for the exact same reason `SaveAsDialog`'s
- * `triggerBrowserDownload` uses it: against a saved, cross-origin server
- * (`../../lib/browser/serverConfig.ts`'s `apiBase()`) the `download`
- * attribute is ignored cross-origin, so a response that is not actually an
- * attachment (the audio was swept by retention, the transcription was
- * deleted elsewhere, the saved server is unreachable) would otherwise
- * navigate this whole SPA tab to a 404/error page and lose all its state;
- * a real attachment download still triggers with no lingering tab left
- * behind.
- */
 function MediaActions({ location, opening, revealing, onOpen, onReveal, downloadHref }: MediaActionsProps) {
+  const downloadBusy = useBrowserDownloadBusy(downloadHref);
   if (location === undefined) {
     return (
       <div className={styles.actions}>
@@ -448,9 +451,9 @@ function MediaActions({ location, opening, revealing, onOpen, onReveal, download
   if (!hasWailsRuntime()) {
     return (
       <div className={styles.actions}>
-        <a className={styles.downloadLink} href={downloadHref} download target="_blank" rel="noopener">
-          Download audio
-        </a>
+        <Button variant="neutral" size="sm" disabled={downloadBusy} onClick={() => triggerBrowserDownloadFromClick(downloadHref)}>
+          {downloadBusy ? "Download requested…" : "Download audio"}
+        </Button>
       </div>
     );
   }

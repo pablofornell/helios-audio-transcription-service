@@ -5,10 +5,14 @@ import {
   defaultSaveDirectory,
   HeliosError,
   saveTranscript,
+  useServerSettingsVersion,
   type Transcription,
   type TranscriptFormat,
 } from "../../lib";
 import { transcriptDownloadUrl } from "../../lib/browser/api";
+import { triggerBrowserDownloadFromClick, useBrowserDownloadBusy } from "../../lib/browser/download";
+import { hasDownloadableTranscript } from "../../lib/contentEligibility";
+import { getServerSettingsVersion } from "../../lib/serverSettingsSignal";
 import { hasWailsRuntime } from "../../lib/runtime";
 import styles from "./SaveAsDialog.module.css";
 
@@ -26,26 +30,6 @@ const FORMAT_OPTIONS: { value: TranscriptFormat; label: string }[] = [
   { value: "json", label: "JSON" },
 ];
 
-/**
- * Desktop (`hasWailsRuntime()`): collects a destination folder and writes
- * the rendered transcript there — `SaveTranscript` (see
- * `app.App.SaveTranscript`) writes `<destDir>/<audio stem>-transcription.<format>` and returns
- * the path actually written. `destDir` must already exist; this dialog
- * does not create it. It pre-fills the field with `defaultSaveDirectory`'s
- * answer (the user's system downloads folder) whenever one resolves, and
- * offers a native folder picker (`chooseSaveDirectory`) alongside typing
- * it directly.
- *
- * Browser tab: there is no local folder to write into at all (see
- * `../../lib/browser/api.ts`'s `saveTranscript`, which always rejects), so
- * this instead offers only the format choice and hands off to the
- * browser's own download manager — `transcriptDownloadUrl` plus a
- * temporary `<a download>` click (`triggerBrowserDownload` below), not
- * `fetch` + a blob URL, so this never buffers the whole transcript in
- * memory and works against a cross-origin saved server with no CORS
- * configuration needed for it (an ordinary cross-origin navigation, unlike
- * a `fetch`).
- */
 export function SaveAsDialog({ transcription, initialFormat, onClose }: SaveAsDialogProps) {
   const toast = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -55,8 +39,29 @@ export function SaveAsDialog({ transcription, initialFormat, onClose }: SaveAsDi
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const touchedRef = useRef(false);
+  const settingsVersion = useServerSettingsVersion();
+  const eligible = Boolean(transcription && hasDownloadableTranscript(transcription));
+  const downloadUrl = transcription ? transcriptDownloadUrl(transcription.id, format) : "";
+  const downloadBusy = useBrowserDownloadBusy(downloadUrl);
+  const key = `${settingsVersion}:${transcription?.id ?? ""}:${eligible}:${initialFormat}`;
+  const sessionRef = useRef({ key, active: true, saving: false, picker: 0 });
+  if (sessionRef.current.key !== key) {
+    sessionRef.current.active = false;
+    sessionRef.current = { key, active: true, saving: false, picker: 0 };
+  }
+  const session = sessionRef.current;
+  const current = () => sessionRef.current === session && session.active && settingsVersion === getServerSettingsVersion();
+  function close() {
+    session.active = false;
+    onClose();
+  }
+  useEffect(() => {
+    session.active = true;
+    return () => { session.active = false; };
+  }, [session]);
 
   useEffect(() => {
+    setSaving(false);
     if (!transcription) return;
     setFormat(initialFormat);
     setDestDir("");
@@ -71,7 +76,7 @@ export function SaveAsDialog({ transcription, initialFormat, onClose }: SaveAsDi
     let cancelled = false;
     defaultSaveDirectory()
       .then((dir) => {
-        if (cancelled || touchedRef.current) return;
+        if (cancelled || !current() || touchedRef.current) return;
         setDestDir(dir);
       })
       .catch(() => {});
@@ -79,16 +84,20 @@ export function SaveAsDialog({ transcription, initialFormat, onClose }: SaveAsDi
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transcription?.id]);
+  }, [session]);
 
   async function handleChooseFolder() {
+    const picker = ++session.picker;
+    touchedRef.current = true;
     try {
       const dir = await chooseSaveDirectory();
+      if (!current() || picker !== session.picker) return;
       if (dir) {
         touchedRef.current = true;
         setDestDir(dir);
       }
     } catch (err) {
+      if (!current() || picker !== session.picker) return;
       const helios = err instanceof HeliosError ? err : new HeliosError("unknown", String(err));
       // A browser tab has no native picker (`"media_unavailable"`) — not
       // worth an error toast, the text field below still works.
@@ -97,50 +106,49 @@ export function SaveAsDialog({ transcription, initialFormat, onClose }: SaveAsDi
   }
 
   function handleBrowserDownload() {
-    if (!transcription) return;
-    triggerBrowserDownload(transcriptDownloadUrl(transcription.id, format));
-    // "requested", not "started"/"saved" — this only fired off a
-    // navigation; whether it actually became a download (as opposed to a
-    // 404/error page in the throwaway tab `target="_blank"` sends a
-    // failure to — see `triggerBrowserDownload`'s own doc) is something
-    // this dialog has no way to observe at all.
+    if (!eligible || !current()) return;
+    if (!triggerBrowserDownloadFromClick(downloadUrl)) return;
     toast.show({ message: `${format.toUpperCase()} download requested` });
-    onClose();
+    close();
   }
 
   async function handleSave() {
-    if (!transcription || !destDir.trim()) return;
+    if (!transcription || !eligible || !destDir.trim() || !current() || session.saving) return;
+    session.saving = true;
     setSaving(true);
     setError(undefined);
     try {
       const path = await saveTranscript(transcription.id, format, destDir.trim());
+      if (!current()) return;
       toast.show({ message: `Saved to ${path}` });
-      onClose();
+      close();
     } catch (err) {
+      if (!current()) return;
       const helios = err instanceof HeliosError ? err : new HeliosError("unknown", String(err));
       setError(helios.message);
     } finally {
-      setSaving(false);
+      session.saving = false;
+      if (current()) setSaving(false);
     }
   }
 
   return (
     <Dialog
       open={transcription !== undefined}
-      onClose={onClose}
+      onClose={close}
       title="Save transcript as"
       initialFocusRef={browser ? undefined : inputRef}
       footer={
         <>
-          <Button variant="neutral" onClick={onClose} data-dialog-safe-action="">
+          <Button variant="neutral" onClick={close} data-dialog-safe-action="">
             Cancel
           </Button>
           {browser ? (
-            <Button variant="primary" onClick={handleBrowserDownload}>
-              Download
+            <Button variant="primary" disabled={!eligible || downloadBusy} onClick={handleBrowserDownload}>
+              {downloadBusy ? "Download requested…" : "Download"}
             </Button>
           ) : (
-            <Button variant="primary" loading={saving} disabled={!destDir.trim()} onClick={handleSave}>
+            <Button variant="primary" loading={saving} disabled={!eligible || !destDir.trim()} onClick={handleSave}>
               Save
             </Button>
           )}
@@ -184,38 +192,4 @@ export function SaveAsDialog({ transcription, initialFormat, onClose }: SaveAsDi
       )}
     </Dialog>
   );
-}
-
-/**
- * Navigates a temporary, invisible `<a download>` at `url` and removes it
- * immediately — the browser's own download manager takes it from there.
- * Deliberately not `fetch` + a `Blob` URL: that would buffer the entire
- * transcript in memory before it could start writing to disk, and would
- * need CORS to succeed at all against a saved, cross-origin server
- * (`../../lib/browser/serverConfig.ts`'s `apiBase()`) — a plain navigation,
- * same as clicking a link, needs neither.
- *
- * `target="_blank"` matters specifically for that saved, cross-origin case:
- * a browser ignores the `download` attribute across origins, so a
- * same-tab navigation whose response is NOT actually an attachment (the
- * transcript is gone by the time this lands, the id no longer exists, the
- * saved server is unreachable — a 404/error page or raw JSON instead of
- * `Content-Disposition: attachment`) would otherwise replace this whole
- * SPA tab and lose all its state. With `target="_blank"`, a genuine
- * attachment download still triggers with no lingering tab left behind
- * (modern browsers close a `_blank` target that immediately turned into a
- * download without ever rendering anything in it); a failure instead opens
- * and is stranded in a throwaway tab, which costs nothing here.
- * `rel="noopener"` keeps that new tab from getting a `window.opener` back
- * to this one, same as any other `target="_blank"` link.
- */
-function triggerBrowserDownload(url: string): void {
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "";
-  a.target = "_blank";
-  a.rel = "noopener";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
 }

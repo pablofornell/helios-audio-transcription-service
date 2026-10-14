@@ -1,5 +1,6 @@
 import { useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { Button, EmptyState, Menu, Segmented, Skeleton, TextField, type MenuItem } from "../../components";
+import { hasDownloadableTranscript } from "../../lib/contentEligibility";
 import { errorCopyFor } from "../transcribe/errorCopy";
 import { STATUS_FILTER_LABELS, type StatusFilterValue } from "./helpers";
 import { LibraryRow } from "./LibraryRow";
@@ -71,7 +72,7 @@ export function LibraryList({
         ...(menuItem.status === "failed" && errorCopyFor(menuItem.error?.code).retryable
           ? [{ id: "retry", label: "Retry", onSelect: () => onRetry(menuItem.id) }]
           : []),
-        ...(menuItem.status === "succeeded" ? [{ id: "save", label: "Save transcript as…", onSelect: () => onSaveAs(menuItem.id) }] : []),
+        ...(hasDownloadableTranscript(menuItem) ? [{ id: "save", label: "Save transcript as…", onSelect: () => onSaveAs(menuItem.id) }] : []),
         { id: "delete", label: "Delete…", destructive: true, onSelect: () => onDelete(menuItem.id) },
       ]
     : [];
@@ -122,7 +123,7 @@ export function LibraryList({
             body={
               search.trim() || status
                 ? "Nothing matches the current filters."
-                : "Nothing transcribed yet — finished jobs show up here."
+                : "No stored audio yet — uploaded files show up here."
             }
           />
         ) : (

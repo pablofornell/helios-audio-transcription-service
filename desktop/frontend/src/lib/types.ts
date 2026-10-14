@@ -185,6 +185,7 @@ export interface SubmitRequest {
 }
 
 export interface ListFilter {
+  library?: boolean;
   status?: Status;
   cursor?: string;
   limit?: number;

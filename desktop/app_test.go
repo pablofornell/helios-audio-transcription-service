@@ -105,6 +105,9 @@ func TestApp_Get_PropagatesError(t *testing.T) {
 func TestApp_List(t *testing.T) {
 	api := &fakeAPI{
 		listFunc: func(ctx context.Context, f domain.ListFilter) (domain.Page, error) {
+			if !f.Library {
+				t.Error("List did not forward Library mode")
+			}
 			if f.Status != domain.StatusRunning {
 				t.Errorf("List called with Status %q, want %q", f.Status, domain.StatusRunning)
 			}
@@ -113,7 +116,7 @@ func TestApp_List(t *testing.T) {
 	}
 	a := &App{api: api}
 
-	page, err := a.List(ListFilterDTO{Status: string(domain.StatusRunning)})
+	page, err := a.List(ListFilterDTO{Library: true, Status: string(domain.StatusRunning)})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}

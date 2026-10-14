@@ -21,9 +21,10 @@ func TestList_EncodesFilterAsQueryParams(t *testing.T) {
 	}))
 
 	_, err := c.List(context.Background(), domain.ListFilter{
-		Status: domain.StatusFailed,
-		Cursor: "some-opaque-cursor",
-		Limit:  7,
+		Library: true,
+		Status:  domain.StatusFailed,
+		Cursor:  "some-opaque-cursor",
+		Limit:   7,
 	})
 	require.NoError(t, err)
 
@@ -31,6 +32,7 @@ func TestList_EncodesFilterAsQueryParams(t *testing.T) {
 	assert.Contains(t, q, "status=failed")
 	assert.Contains(t, q, "cursor=some-opaque-cursor")
 	assert.Contains(t, q, "limit=7")
+	assert.Contains(t, q, "library=true")
 }
 
 func TestList_ZeroFilter_NoQueryString(t *testing.T) {

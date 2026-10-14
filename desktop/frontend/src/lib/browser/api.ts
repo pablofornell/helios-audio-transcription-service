@@ -118,6 +118,7 @@ export function chooseAudioFile(): Promise<string> {
 /** Lists transcriptions matching `filter`, newest first. See `app.App.List` / `GET /api/v1/transcriptions`. */
 export function list(filter: ListFilter = {}): Promise<ListPage> {
   const q = new URLSearchParams();
+  if (filter.library !== undefined) q.set("library", String(filter.library));
   if (filter.status) q.set("status", filter.status);
   if (filter.limit !== undefined) q.set("limit", String(filter.limit));
   if (filter.cursor) q.set("cursor", filter.cursor);

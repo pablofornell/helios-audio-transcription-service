@@ -318,6 +318,14 @@ func (h *handlers) listTranscriptions(w http.ResponseWriter, r *http.Request) {
 		Cursor: q.Get("cursor"),
 	}
 
+	if values, present := q["library"]; present {
+		if len(values) != 1 || (values[0] != "true" && values[0] != "false") {
+			writeError(w, r, domain.New(domain.ErrCodeInvalidInput, "library must be true or false").WithDetails("field", "library"))
+			return
+		}
+		filter.Library = values[0] == "true"
+	}
+
 	if raw := q.Get("status"); raw != "" {
 		status := domain.Status(raw)
 		if !status.Valid() {

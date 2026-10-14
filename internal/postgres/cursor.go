@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"encoding/base64"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,4 +51,39 @@ func decodeCursor(cursor string) (time.Time, string, error) {
 	}
 
 	return createdAt, parts[1], nil
+}
+
+// Library cursors carry the ordering rank and retain timestamp precision.
+func encodeLibraryCursor(t *domain.Transcription) string {
+	rank, at := libraryPosition(t)
+	raw := "library|" + strconv.Itoa(rank) + "|" + at.UTC().Format(time.RFC3339Nano) + "|" + t.ID
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+func libraryPosition(t *domain.Transcription) (int, time.Time) {
+	switch t.Status {
+	case domain.StatusRunning:
+		return 0, t.CreatedAt
+	case domain.StatusPending:
+		return 1, t.CreatedAt
+	default:
+		if t.CompletedAt != nil {
+			return 2, *t.CompletedAt
+		}
+		return 2, t.CreatedAt
+	}
+}
+
+func decodeLibraryCursor(cursor string) (int, time.Time, string, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	parts := strings.Split(string(raw), "|")
+	if err != nil || len(parts) != 4 || parts[0] != "library" {
+		return 0, time.Time{}, "", domain.New(domain.ErrCodeInvalidInput, "malformed library cursor")
+	}
+	rank, err := strconv.Atoi(parts[1])
+	if err != nil || rank < 0 || rank > 2 {
+		return 0, time.Time{}, "", domain.New(domain.ErrCodeInvalidInput, "malformed library cursor")
+	}
+	at, id, err := decodeCursor(base64.RawURLEncoding.EncodeToString([]byte(parts[2] + "|" + parts[3])))
+	return rank, at, id, err
 }

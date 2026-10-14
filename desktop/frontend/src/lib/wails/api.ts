@@ -71,6 +71,7 @@ export function list(filter: ListFilter = {}): Promise<ListPage> {
   return call(() =>
     Bound.List(
       asArg({
+        library: filter.library,
         status: filter.status,
         cursor: filter.cursor,
         limit: filter.limit,

@@ -94,10 +94,9 @@ func (s *Store) Get(ctx context.Context, id string) (*domain.Transcription, erro
 	return t, nil
 }
 
-// List returns a page of transcriptions matching f, ordered by
-// (created_at DESC, id DESC), using keyset pagination on that same pair so
-// a page boundary never skips or repeats a row that shares created_at with
-// its neighbours -- see CONTRACT.md section 7.
+// List defaults to newest-created keyset pagination. Library mode filters
+// stored audio and orders running/pending FIFO before recent completions,
+// using a separate rank/time/id cursor with full timestamp precision.
 func (s *Store) List(ctx context.Context, f ListFilter) (Page, error) {
 	limit := f.Limit
 	switch {
@@ -110,11 +109,16 @@ func (s *Store) List(ctx context.Context, f ListFilter) (Page, error) {
 	var (
 		cursorCreatedAt time.Time
 		cursorID        string
+		cursorRank      int
 		hasCursor       bool
 	)
 	if f.Cursor != "" {
 		var err error
-		cursorCreatedAt, cursorID, err = decodeCursor(f.Cursor)
+		if f.Library {
+			cursorRank, cursorCreatedAt, cursorID, err = decodeLibraryCursor(f.Cursor)
+		} else {
+			cursorCreatedAt, cursorID, err = decodeCursor(f.Cursor)
+		}
 		if err != nil {
 			return Page{}, err
 		}
@@ -127,7 +131,20 @@ func (s *Store) List(ctx context.Context, f ListFilter) (Page, error) {
 		args = append(args, string(f.Status))
 		query += fmt.Sprintf(" AND status = $%d", len(args))
 	}
-	if hasCursor {
+	rankSQL := "CASE status WHEN 'running' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END"
+	timeSQL := "CASE WHEN status IN ('running', 'pending') THEN created_at ELSE COALESCE(completed_at, created_at) END"
+	if f.Library {
+		query += " AND btrim(source_path) <> '' AND btrim(audio->>'filename') <> '' AND (audio->>'sizeBytes')::bigint > 0"
+	}
+	if hasCursor && f.Library {
+		args = append(args, cursorRank, cursorCreatedAt, cursorID)
+		r, at, id := len(args)-2, len(args)-1, len(args)
+		op := ">"
+		if cursorRank == 2 {
+			op = "<"
+		}
+		query += fmt.Sprintf(" AND ((%s) > $%d OR ((%s) = $%d AND ((%s) %s $%d OR ((%s) = $%d AND id > $%d::uuid))))", rankSQL, r, rankSQL, r, timeSQL, op, at, timeSQL, at, id)
+	} else if hasCursor {
 		args = append(args, cursorCreatedAt, cursorID)
 		query += fmt.Sprintf(" AND (created_at, id) < ($%d, $%d)", len(args)-1, len(args))
 	}
@@ -135,7 +152,11 @@ func (s *Store) List(ctx context.Context, f ListFilter) (Page, error) {
 	// extra round trip, and never hand back a NextCursor that leads to an
 	// empty final page.
 	args = append(args, limit+1)
-	query += fmt.Sprintf(" ORDER BY created_at DESC, id DESC LIMIT $%d", len(args))
+	if f.Library {
+		query += fmt.Sprintf(" ORDER BY (%s) ASC, CASE WHEN status IN ('running', 'pending') THEN created_at END ASC, CASE WHEN status NOT IN ('running', 'pending') THEN COALESCE(completed_at, created_at) END DESC, id ASC LIMIT $%d", rankSQL, len(args))
+	} else {
+		query += fmt.Sprintf(" ORDER BY created_at DESC, id DESC LIMIT $%d", len(args))
+	}
 
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -159,7 +180,11 @@ func (s *Store) List(ctx context.Context, f ListFilter) (Page, error) {
 	if len(items) > limit {
 		last := items[limit-1]
 		page.Items = items[:limit]
-		page.NextCursor = encodeCursor(last.CreatedAt, last.ID)
+		if f.Library {
+			page.NextCursor = encodeLibraryCursor(last)
+		} else {
+			page.NextCursor = encodeCursor(last.CreatedAt, last.ID)
+		}
 	}
 	return page, nil
 }

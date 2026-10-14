@@ -1,6 +1,8 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { StrictMode } from "react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { bumpServerSettingsVersion } from "../../lib";
 import { LibraryScreen } from "./LibraryScreen";
 
 // LibraryScreen's own backend call (the "View in Library" hand-off's
@@ -9,10 +11,11 @@ import { LibraryScreen } from "./LibraryScreen";
 // (spread from actual) so this suite can trigger the same signal
 // setServerSettings bumps after a save, without going through a whole
 // ServerSettingsSection render.
-const get = vi.hoisted(() => vi.fn());
+const { get, list } = vi.hoisted(() => ({ get: vi.fn(), list: vi.fn() }));
 vi.mock("../../lib", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib")>()),
   get: (...args: unknown[]) => get(...args),
+  list: (...args: unknown[]) => list(...args),
 }));
 
 // DetailPanel pulls in audio playback, transcript fetching and more --
@@ -20,9 +23,10 @@ vi.mock("../../lib", async (importOriginal) => ({
 // only needs to prove which transcription it currently holds, and that
 // LibraryScreen's onClose reaches it.
 vi.mock("./DetailPanel", () => ({
-  DetailPanel: ({ transcription, onClose }: { transcription: { id: string }; onClose: () => void }) => (
+  DetailPanel: ({ transcription, onClose }: { transcription: { id: string; status: string }; onClose: () => void }) => (
     <div data-testid="detail-panel">
       <span data-testid="detail-id">{transcription.id}</span>
+      <span data-testid="detail-status">{transcription.status}</span>
       <button onClick={onClose}>close</button>
     </div>
   ),
@@ -39,8 +43,15 @@ const row = (id: string) => ({
   updatedAt: "2026-09-20T20:00:00Z",
 });
 
+beforeEach(() => {
+  get.mockReset();
+  list.mockReset();
+  list.mockResolvedValue({ items: [] });
+});
+
 afterEach(() => {
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 describe("LibraryScreen — server settings changes", () => {
@@ -55,11 +66,82 @@ describe("LibraryScreen — server settings changes", () => {
 
     await waitFor(() => expect(screen.getByTestId("detail-id")).toHaveTextContent("t-1"));
 
-    const { bumpServerSettingsVersion } = await import("../../lib");
     act(() => {
       bumpServerSettingsVersion();
     });
 
     await waitFor(() => expect(screen.queryByTestId("detail-panel")).not.toBeInTheDocument());
   });
+});
+
+
+describe("LibraryScreen detail refresh and request fencing", () => {
+  it("updates the open detail when a polled row completes", async () => {
+    vi.useFakeTimers();
+    const active = { ...row("active"), status: "running" };
+    get.mockResolvedValue(active);
+    list.mockResolvedValueOnce({ items: [active] });
+    render(<LibraryScreen openId="active" />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByTestId("detail-status")).toHaveTextContent("running");
+    list.mockResolvedValue({ items: [{ ...row("active"), result: { text: "finished" } }] });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
+    expect(screen.getByTestId("detail-status")).toHaveTextContent("succeeded");
+  });
+
+  it("discards a detail response from the server before settings changed", async () => {
+    let finish: (value: ReturnType<typeof row>) => void = () => {};
+    get.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    list.mockResolvedValue({ items: [] });
+    render(<LibraryScreen openId="old" />);
+    await act(async () => bumpServerSettingsVersion());
+    await act(async () => finish(row("old")));
+    expect(screen.queryByTestId("detail-panel")).not.toBeInTheDocument();
+  });
+
+  it("discards an older open request after another id is opened", async () => {
+    let finish: (value: ReturnType<typeof row>) => void = () => {};
+    get.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    list.mockResolvedValue({ items: [] });
+    const view = render(<LibraryScreen openId="old" />);
+    get.mockResolvedValueOnce(row("new"));
+    view.rerender(<LibraryScreen openId="new" />);
+    await waitFor(() => expect(screen.getByTestId("detail-id")).toHaveTextContent("new"));
+    await act(async () => finish(row("old")));
+    expect(screen.getByTestId("detail-id")).toHaveTextContent("new");
+  });
+});
+
+
+it("refreshes selected detail even when filename search hides its loaded row", async () => {
+  vi.useFakeTimers();
+  const active = { ...row("active"), status: "running" };
+  get.mockResolvedValue(active);
+  list.mockResolvedValueOnce({ items: [active] });
+  render(<LibraryScreen openId="active" />);
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  fireEvent.change(screen.getByRole("textbox", { name: "Search transcriptions" }), { target: { value: "other-file" } });
+  list.mockResolvedValue({ items: [{ ...row("active"), result: { text: "finished" } }] });
+  await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
+  expect(screen.getByTestId("detail-status")).toHaveTextContent("succeeded");
+});
+
+it("polls open detail independently when its status is excluded from loaded rows", async () => {
+  vi.useFakeTimers();
+  const active = { ...row("active"), status: "running" };
+  get.mockResolvedValueOnce(active);
+  list.mockResolvedValue({ items: [] });
+  render(<LibraryScreen openId="active" />);
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(screen.getByTestId("detail-status")).toHaveTextContent("running");
+  get.mockResolvedValue({ ...row("active"), result: { text: "finished" } });
+  await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
+  expect(screen.getByTestId("detail-status")).toHaveTextContent("succeeded");
+});
+
+
+it("opens the handed-off detail after StrictMode replays mount effects", async () => {
+  get.mockResolvedValue(row("active"));
+  render(<StrictMode><LibraryScreen openId="active" /></StrictMode>);
+  await waitFor(() => expect(screen.getByTestId("detail-id")).toHaveTextContent("active"));
 });

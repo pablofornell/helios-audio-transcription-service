@@ -202,9 +202,10 @@ type SubmitRequestDTO struct {
 // ListFilterDTO mirrors the query parameters GET /api/v1/transcriptions
 // takes (see docs/openapi.yaml) -- the argument to the List binding.
 type ListFilterDTO struct {
-	Status string `json:"status,omitempty"`
-	Cursor string `json:"cursor,omitempty"`
-	Limit  int    `json:"limit,omitempty"`
+	Library bool   `json:"library,omitempty"`
+	Status  string `json:"status,omitempty"`
+	Cursor  string `json:"cursor,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
 }
 
 // toDomain converts f to a domain.ListFilter, rejecting a Status that is
@@ -218,7 +219,7 @@ func (f ListFilterDTO) toDomain() (domain.ListFilter, error) {
 		return domain.ListFilter{}, domain.New(domain.ErrCodeInvalidInput, "invalid status "+f.Status).
 			WithDetails("field", "status")
 	}
-	return domain.ListFilter{Status: status, Cursor: f.Cursor, Limit: f.Limit}, nil
+	return domain.ListFilter{Status: status, Cursor: f.Cursor, Limit: f.Limit, Library: f.Library}, nil
 }
 
 // ListPageDTO mirrors httpapi's listTranscriptionsResponseDTO.

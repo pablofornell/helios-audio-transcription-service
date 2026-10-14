@@ -4,10 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ACTIVE_POLL_MS, bumpServerSettingsVersion, IDLE_POLL_MS } from "../../lib";
 import { useLibraryQuery } from "./useLibraryQuery";
 
-const list = vi.hoisted(() => vi.fn());
+const { list, get } = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn() }));
 vi.mock("../../lib", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib")>()),
   list: (...args: unknown[]) => list(...args),
+  get: (...args: unknown[]) => get(...args),
 }));
 
 const row = (id: string, status = "succeeded") => ({
@@ -35,6 +36,7 @@ const flush = async (ms = 0) => {
 beforeEach(() => {
   vi.useFakeTimers();
   list.mockReset();
+  get.mockReset();
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -50,7 +52,7 @@ describe("useLibraryQuery background refresh", () => {
     await flush();
     expect(result.current.items).toHaveLength(1);
 
-    list.mockResolvedValueOnce(page([row("b"), row("a")]));
+    list.mockResolvedValueOnce(page([{ ...row("b"), completedAt: "2026-09-21T20:00:00Z" }, row("a")]));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(IDLE_POLL_MS + 50);
     });
@@ -72,27 +74,55 @@ describe("useLibraryQuery background refresh", () => {
     expect(list.mock.calls.length).toBeGreaterThan(callsAfterMount);
   });
 
-  // Replacing items with page one would yank away everything the user
-  // paged in, so the refresh stands down once they have paged.
-  it("stops refreshing once the user has loaded a second page", async () => {
+  it("keeps loaded pages live when an older active row completes", async () => {
     list.mockResolvedValueOnce(page([row("a")], "cursor-1"));
     const { result } = renderHook(() => useLibraryQuery());
     await flush();
-    expect(result.current.hasMore).toBe(true);
-
-    list.mockResolvedValueOnce(page([row("b")]));
-    await act(async () => {
-      result.current.loadMore();
-    });
+    expect(list).toHaveBeenCalledWith({ library: true, limit: 40, status: undefined });
+    list.mockResolvedValueOnce(page([row("b", "running")]));
+    act(() => result.current.loadMore());
     await flush();
-    expect(result.current.items).toHaveLength(2);
+    list.mockResolvedValue(page([row("a")]));
+    get.mockResolvedValue({ ...row("b"), result: { text: "finished" }, completedAt: "2026-09-21T20:00:00Z" });
+    await flush(ACTIVE_POLL_MS + 50);
+    expect(get).toHaveBeenCalledWith("b");
+    expect(result.current.items.map((item) => item.id)).toEqual(["b", "a"]);
+    expect(result.current.items[0].result).toEqual({ text: "finished" });
+    expect(result.current.loadingMore).toBe(false);
+  });
 
-    const callsAfterPaging = list.mock.calls.length;
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(IDLE_POLL_MS * 2);
-    });
-    expect(list.mock.calls.length).toBe(callsAfterPaging);
-    expect(result.current.items).toHaveLength(2);
+  it("fences in-flight polls when paging or a mutation supersedes them", async () => {
+    list.mockResolvedValueOnce(page([row("a")], "tail"));
+    const { result } = renderHook(() => useLibraryQuery());
+    await flush();
+    let finishPoll: (value: ReturnType<typeof page>) => void = () => {};
+    list.mockImplementationOnce(() => new Promise((resolve) => { finishPoll = resolve; }));
+    await flush(IDLE_POLL_MS);
+    list.mockResolvedValueOnce(page([row("b")]));
+    act(() => result.current.loadMore());
+    await flush();
+    act(() => result.current.removeItem("a"));
+    finishPoll(page([row("a")]));
+    await flush();
+    expect(result.current.items.map((item) => item.id)).toEqual(["b"]);
+    expect(result.current.loadingMore).toBe(false);
+  });
+
+  it("clears pending paging when status changes and ignores its late response", async () => {
+    list.mockResolvedValueOnce(page([row("a")], "tail"));
+    const { result } = renderHook(() => useLibraryQuery());
+    await flush();
+    let finishPage: (value: ReturnType<typeof page>) => void = () => {};
+    list.mockImplementationOnce(() => new Promise((resolve) => { finishPage = resolve; }));
+    act(() => result.current.loadMore());
+    expect(result.current.loadingMore).toBe(true);
+    list.mockResolvedValueOnce(page([row("failed", "failed")]));
+    act(() => result.current.setStatus("failed"));
+    await flush();
+    finishPage(page([row("old")]));
+    await flush();
+    expect(result.current.items.map((item) => item.id)).toEqual(["failed"]);
+    expect(result.current.loadingMore).toBe(false);
   });
 
   // A background poll that fails must leave the readable list alone.

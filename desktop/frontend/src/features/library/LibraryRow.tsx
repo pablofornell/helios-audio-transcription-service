@@ -66,7 +66,7 @@ export const LibraryRow = forwardRef<HTMLLIElement, LibraryRowProps>(function Li
         </span>
       }
       meta={
-        <span id={descId} title={formatAbsolute(transcription.createdAt)}>
+        <span id={descId} title={formatAbsolute(transcription.completedAt ?? transcription.createdAt)}>
           {buildLibraryMeta(transcription)}
         </span>
       }
