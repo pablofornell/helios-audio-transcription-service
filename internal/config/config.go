@@ -86,6 +86,10 @@ type TranscriberConfig struct {
 	AllowedModels []string
 	// Threads is the -t value passed to whisper-cli.
 	Threads int
+	// NoGPU disables GPU acceleration and forces CPU transcription.
+	NoGPU bool
+	// GPUDevice selects whisper-cli's GPU device index when NoGPU is false.
+	GPUDevice int
 	// Timeout bounds a single Transcribe call. It, together with
 	// Audio.Timeout, must leave headroom under Worker.JobTimeout — see
 	// Validate.
@@ -243,9 +247,11 @@ func Load() (*Config, error) {
 			Kind:          l.getString("TRANSCRIBER_KIND", "whispercpp"),
 			Binary:        l.getString("TRANSCRIBER_BINARY", "whisper-cli"),
 			ModelDir:      l.getString("TRANSCRIBER_MODEL_DIR", "/models"),
-			DefaultModel:  l.getString("TRANSCRIBER_DEFAULT_MODEL", "base"),
+			DefaultModel:  l.getString("TRANSCRIBER_DEFAULT_MODEL", "large-v3"),
 			AllowedModels: l.getStringSlice("TRANSCRIBER_ALLOWED_MODELS", []string{"tiny", "base", "small", "medium", "large-v3"}),
 			Threads:       l.getInt("TRANSCRIBER_THREADS", 4),
+			NoGPU:         l.getBool("TRANSCRIBER_NO_GPU", false),
+			GPUDevice:     l.getInt("TRANSCRIBER_GPU_DEVICE", 0),
 			Timeout:       l.getDuration("TRANSCRIBER_TIMEOUT", 30*time.Minute),
 		},
 		Audio: AudioConfig{
@@ -379,6 +385,9 @@ func (c *Config) Validate() error {
 	case "whispercpp", "fake":
 	default:
 		return fmt.Errorf("config: unknown transcriber kind %q", c.Transcriber.Kind)
+	}
+	if c.Transcriber.GPUDevice < 0 {
+		return fmt.Errorf("config: transcriber GPU device must be >= 0, got %d", c.Transcriber.GPUDevice)
 	}
 	if len(c.Transcriber.AllowedModels) == 0 {
 		// An empty allow-list does not mean "any model is fine": it made

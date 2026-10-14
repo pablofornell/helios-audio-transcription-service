@@ -3,6 +3,7 @@ WAILS := export PATH="/usr/local/go/bin:$$HOME/go/bin:$$PATH"; wails
 BINARY := helios-transcription-api
 DOCKER_IMAGE := helios-transcription-api
 COMPOSE := docker compose -f deploy/docker-compose.yml
+COMPOSE_VULKAN := $(COMPOSE) -f deploy/docker-compose.vulkan.yml
 # Ubuntu 24.04 ships libwebkit2gtk-4.1-dev, not the 4.0 package Wails v2
 # looks for by default; every desktop build/dev invocation needs this tag.
 # It is also set as desktop/wails.json's own "build:tags", so this is
@@ -59,7 +60,7 @@ migrate: ## Apply database migrations using HELIOS_DATABASE_DSN.
 	$(GO) run ./cmd/helios-transcription-api --migrate-only
 
 .PHONY: models
-models: ## Download whisper.cpp ggml model weights into ./models (default: base; override with `make models MODEL=large-v3`).
+models: ## Download whisper.cpp ggml model weights into ./models (default: large-v3; override with `make models MODEL=base`).
 	./scripts/fetch-models.sh $(MODEL)
 
 .PHONY: docker-build
@@ -69,6 +70,10 @@ docker-build: ## Build the helios-transcription-api Docker image.
 .PHONY: compose-up
 compose-up: ## Start postgres + helios-transcription-api via docker compose.
 	$(COMPOSE) up -d
+
+.PHONY: compose-up-vulkan
+compose-up-vulkan: ## Build/start AMD Vulkan stack (set HELIOS_RENDER_GID; see runbook).
+	$(COMPOSE_VULKAN) up -d --build
 
 .PHONY: compose-down
 compose-down: ## Stop and remove the docker compose stack.

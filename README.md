@@ -15,10 +15,10 @@ To run the **service**:
 - [Docker](https://docs.docker.com/get-docker/) + Docker Compose.
 
 `ffmpeg`/`ffprobe` are baked into the service's container image
-(`deploy/Dockerfile`). `whisper-cli` and its model weights are **not** — whisper.cpp
-model files are large (hundreds of MB to a few GB each) and licensed/distributed
-separately, so they are provisioned once, out of band, rather than baked into the
-image. See `docs/RUNBOOK.md`'s **Prerequisites** for exactly how.
+(`deploy/Dockerfile`), together with a Vulkan-enabled `whisper-cli` and Mesa RADV.
+Model weights are large (hundreds of MB to a few GB each) and distributed
+separately, so they are provisioned once rather than baked into the image.
+See `docs/RUNBOOK.md`'s **Prerequisites** for exactly how.
 
 To build from source: **Go 1.27** (`go.mod` pins `go 1.27`, built and tested against
 `go1.27.1`).
@@ -55,7 +55,7 @@ curl -s -X POST localhost:7462/api/v1/transcriptions \
   "id": "7e3c2c1a-9e0b-4f2a-8a3a-1a2b3c4d5e6f",
   "status": "pending",
   "options": {
-    "model": "base",
+    "model": "large-v3",
     "language": "",
     "task": "transcribe",
     "wordTimestamps": true,
@@ -102,7 +102,7 @@ curl -s localhost:7462/api/v1/transcriptions/7e3c2c1a-9e0b-4f2a-8a3a-1a2b3c4d5e6
     "text": "Thanks for joining me today. Let's start with...",
     "language": "en",
     "durationSeconds": 214.32,
-    "model": "base",
+    "model": "large-v3",
     "task": "transcribe",
     "segments": [
       {"id": 0, "start": 0.0, "end": 3.2, "text": "Thanks for joining me today."}
@@ -132,12 +132,21 @@ export the variables directly for `go run`/`make run`. The ones worth knowing up
 | `HELIOS_STORAGE_MIN_FREE_BYTES` | `1073741824` (1 GiB) | Uploads are refused once free space on this volume drops below it. |
 | `HELIOS_TRANSCRIBER_KIND` | `whispercpp` | `whispercpp` for real transcription via the `whisper-cli` subprocess, `fake` for a deterministic, no-subprocess double (tests, local dev). |
 | `HELIOS_TRANSCRIBER_MODEL_DIR` | `/models` | Holds `ggml-<model>.bin` weight files — see `docs/RUNBOOK.md`. |
-| `HELIOS_TRANSCRIBER_DEFAULT_MODEL` | `base` | Used when a submission's `options.model` is empty. |
+| `HELIOS_TRANSCRIBER_DEFAULT_MODEL` | `large-v3` | Used when a submission's `options.model` is empty. |
+| `HELIOS_TRANSCRIBER_NO_GPU` | `false` | GPU takes priority by default. Set `true` to force CPU transcription (`--no-gpu`). |
+| `HELIOS_TRANSCRIBER_GPU_DEVICE` | `0` | Nonnegative whisper-cli GPU index (`--device`), ignored in CPU mode. |
 | `HELIOS_TRANSCRIBER_ALLOWED_MODELS` | `tiny,base,small,medium,large-v3` | Comma-separated allow-list `options.model` must belong to when non-empty. |
 | `HELIOS_WORKER_CONCURRENCY` | `2` | How many transcriptions run at once per process. |
 | `HELIOS_AUDIO_MAX_DURATION` | `4h` | Audio longer than this is rejected (at probe time — see `docs/ARCHITECTURE.md`). |
 | `HELIOS_RETENTION_MAX_AGE` | `168h` (7 days) | How old a terminal (succeeded/failed/canceled) transcription must be before the retention sweep deletes it — database row and files both. See `docs/RUNBOOK.md`. |
 | `HELIOS_CORS_ALLOWED_ORIGINS` | *(unset, CORS disabled)* | Comma-separated exact origins (`scheme://host[:port]`, no wildcard) allowed to make cross-origin browser requests against this API. Only needed when the web build of `desktop/frontend` (a browser tab, not the Wails app) is pointed at a server on a different origin than the one it was served from — see its own Settings → Server, and `desktop/frontend/src/lib/browser/serverConfig.ts`. The ordinary same-origin deployment never needs this. |
+
+For a **Ryzen 7 7730U on Linux**, use the AMD Vulkan Compose override described in
+the [runbook](docs/RUNBOOK.md#amd-vulkan-ryzen-7-7730u). It grants the service user
+access to the AMD render node, selects Mesa RADV, and defaults to one job at a time.
+The default model is `large-v3`; use four CPU threads and measure with your own
+audio before increasing concurrency. `scripts/check-vulkan.sh` checks device access
+and, with a WAV file, verifies actual Vulkan transcription.
 
 **Why `HELIOS_`, not `ATS_`.** These variables, the `helios_`-prefixed Prometheus
 metrics on `/metrics`, the `github.com/pablofornell/helios-audio-transcription-service`

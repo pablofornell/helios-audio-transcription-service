@@ -56,6 +56,12 @@ type Config struct {
 	// Threads is the -t value passed to whisper-cli. Defaults to
 	// defaultThreads.
 	Threads int
+	// NoGPU passes --no-gpu to force CPU transcription. By default,
+	// whisper-cli prioritizes GPU acceleration when its build and device
+	// support it, retaining CPU support for remaining operations/fallback.
+	NoGPU bool
+	// GPUDevice is the --device index when NoGPU is false. Defaults to 0.
+	GPUDevice int
 	// Timeout is the hard ceiling on any single Transcribe call, enforced
 	// regardless of what the caller's ctx allows — see command in
 	// process.go. Defaults to defaultTimeout.

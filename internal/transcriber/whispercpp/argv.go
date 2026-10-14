@@ -46,6 +46,12 @@ func buildArgs(cfg Config, req domain.TranscribeRequest, modelPath, outBase stri
 		"-l", lang,
 	}
 
+	if cfg.NoGPU {
+		args = append(args, "--no-gpu")
+	} else {
+		args = append(args, "--device", strconv.Itoa(cfg.GPUDevice))
+	}
+
 	if req.Options.Task == domain.TaskTranslate {
 		args = append(args, "-tr")
 	}

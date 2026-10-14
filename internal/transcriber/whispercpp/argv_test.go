@@ -45,6 +45,32 @@ func TestBuildArgs_autoDetectLanguage(t *testing.T) {
 	assert.Equal(t, "auto", args[indexOf(args, "-l")+1])
 }
 
+func TestBuildArgs_GPUSelection(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		cfg    Config
+		device string
+	}{
+		{name: "default", cfg: Config{}, device: "0"},
+		{name: "selected device", cfg: Config{GPUDevice: 2}, device: "2"},
+		{name: "CPU overrides device", cfg: Config{NoGPU: true, GPUDevice: 2}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			args := buildArgs(tt.cfg, baseReq(), "m", "o")
+			if tt.cfg.NoGPU {
+				assert.Contains(t, args, "--no-gpu")
+				assert.NotContains(t, args, "--device")
+				return
+			}
+			assert.NotContains(t, args, "--no-gpu")
+			i := indexOf(args, "--device")
+			require.GreaterOrEqual(t, i, 0)
+			require.Less(t, i+1, len(args))
+			assert.Equal(t, tt.device, args[i+1])
+		})
+	}
+}
+
 func TestBuildArgs_forcedLanguage(t *testing.T) {
 	req := baseReq()
 	req.Options.Language = "es"

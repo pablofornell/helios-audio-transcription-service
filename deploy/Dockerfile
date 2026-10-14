@@ -15,16 +15,19 @@ RUN CGO_ENABLED=0 go build -o /out/helios-transcription-api ./cmd/helios-transcr
 # shares nothing with it but the final COPY into runtime: a change to the
 # Go source never invalidates this stage's (multi-minute) cmake build, and
 # vice versa.
-FROM debian:bookworm-slim AS whispercpp-builder
+# Match upstream's Vulkan image: recent Vulkan headers, glslc and Mesa RADV.
+FROM ubuntu:24.04 AS whispercpp-builder
 
 # Pinned to the current stable release tag (verified against
 # https://github.com/ggml-org/whisper.cpp/releases/tag/v1.9.4, published
 # 2026-09-11), the same way ARG YTDLP_VERSION pins BLUEPRINT's yt-dlp.
 ARG WHISPER_CPP_VERSION=v1.9.4
+ARG WHISPER_BUILD_JOBS=4
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential cmake git ca-certificates \
+        libvulkan-dev glslc spirv-headers \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -46,14 +49,16 @@ RUN git clone --depth 1 --branch ${WHISPER_CPP_VERSION} \
 # libstdc++ (whisper.cpp is C++) from the runtime image -- see the runtime
 # stage's apt-get install below.
 RUN cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF \
-    && cmake --build build -j --config Release --target whisper-cli
+        -DGGML_VULKAN=ON \
+    && cmake --build build -j ${WHISPER_BUILD_JOBS} --config Release --target whisper-cli
 
 # ---- runtime --------------------------------------------------------------
-FROM debian:bookworm-slim AS runtime
+FROM ubuntu:24.04 AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates ffmpeg curl \
+        libvulkan1 mesa-vulkan-drivers vulkan-tools \
         # libgomp1 (OpenMP runtime) and libstdc++6 (the C++ standard
         # library) are what whisper-cli, built in the previous stage,
         # actually needs beyond libc even with its own libraries linked in
@@ -63,6 +68,11 @@ RUN apt-get update \
         # this image does not depend on that happening to remain true.
         libgomp1 libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
+
+# Mesa's ICD filename varies with the distribution/architecture. Give the
+# AMD override a stable path so it can exclude software Vulkan (lavapipe).
+RUN mkdir -p /etc/vulkan/icd.d \
+    && cp /usr/share/vulkan/icd.d/radeon_icd*.json /etc/vulkan/icd.d/helios-radv.json
 
 COPY --from=builder /out/helios-transcription-api /usr/local/bin/helios-transcription-api
 COPY --from=whispercpp-builder /src/build/bin/whisper-cli /usr/local/bin/whisper-cli

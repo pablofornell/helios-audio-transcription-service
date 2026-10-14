@@ -100,6 +100,8 @@ func runServer(cfg *config.Config, logger *slog.Logger) error {
 		"http_addr", cfg.HTTP.Addr,
 		"database_dsn", cfg.Database.DSN, // redacted by the logger's handler -- see runMigrateOnly's doc.
 		"transcriber_kind", cfg.Transcriber.Kind,
+		"transcriber_no_gpu", cfg.Transcriber.NoGPU,
+		"transcriber_gpu_device", cfg.Transcriber.GPUDevice,
 		"storage_root_dir", cfg.Storage.RootDir,
 		"worker_concurrency", cfg.Worker.Concurrency,
 		"retention_enabled", cfg.Retention.Enabled,

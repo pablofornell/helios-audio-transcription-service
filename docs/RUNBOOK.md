@@ -13,8 +13,8 @@ To run the **service** via Compose:
 
 `ffmpeg` and `ffprobe` are baked into the service's container image
 (`deploy/Dockerfile`), so you don't need them on the host to run `docker compose up`.
-`whisper-cli` is **not** baked in with model weights preloaded — see **Model weights**,
-below, before your first real job.
+The image also includes a Vulkan-enabled `whisper-cli` and Mesa RADV. Model weights
+are provisioned separately — see **`whisper-cli` and model weights**, below.
 
 To build from source, or to run `helios-transcription-api` outside its container:
 
@@ -32,7 +32,7 @@ per model in `HELIOS_TRANSCRIBER_ALLOWED_MODELS`
 (default `tiny,base,small,medium,large-v3`). Neither the binary nor the weights are
 fetched automatically by ATS itself:
 
-1. Build or install `whisper-cli` from
+1. Outside Docker, build or install `whisper-cli` from
    [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) (`make` in that
    repo builds `build/bin/whisper-cli`; put it on `PATH` or point
    `HELIOS_TRANSCRIBER_BINARY` at it directly).
@@ -45,7 +45,7 @@ fetched automatically by ATS itself:
    or download the `ggml-<model>.bin` files directly from
    [huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp)
    into `HELIOS_TRANSCRIBER_MODEL_DIR`. At minimum, fetch whatever
-   `HELIOS_TRANSCRIBER_DEFAULT_MODEL` names (`base` by default) — every other model in
+   `HELIOS_TRANSCRIBER_DEFAULT_MODEL` names (`large-v3` by default) — every other model in
    `HELIOS_TRANSCRIBER_ALLOWED_MODELS` only needs to be present if a caller actually
    requests it.
 3. `make models` wraps this download step (see `make help` for its exact model list and
@@ -58,6 +58,73 @@ actually there, so a deploy with no weights fails its readiness probe instead of
 accepting work it cannot do. A job that requests some *other* allowed model whose
 `ggml-<model>.bin` is absent still fails individually with `ErrCodeModelUnavailable`
 (503) the moment a worker claims it. See **When a model is missing**, below.
+
+### AMD Vulkan (Ryzen 7 7730U)
+
+The container builds the pinned whisper.cpp release with `GGML_VULKAN=ON`, using
+Ubuntu 24.04 for its Vulkan build/runtime dependencies, as in the
+[upstream Vulkan image](https://github.com/ggml-org/whisper.cpp/blob/v1.9.4/.devops/main-vulkan.Dockerfile).
+Vulkan works through the host's Linux `amdgpu` kernel driver and the container's
+[Mesa RADV driver](https://docs.mesa3d.org/drivers/radv.html). It does not require
+ROCm or `/dev/kfd`. The default model is `large-v3`. The GPU shares RAM with the CPU;
+use four CPU threads and one worker on the 7730U. These are starting settings, not a throughput
+guarantee. Compare representative audio in GPU and CPU mode.
+
+GPU has priority over CPU by default (`HELIOS_TRANSCRIBER_NO_GPU=false`):
+whisper.cpp selects the configured Vulkan device first and schedules supported
+operations there. CPU still handles operations that the GPU backend cannot execute
+and serves as a fallback if no usable GPU is found. Set
+`HELIOS_TRANSCRIBER_NO_GPU=true` only to deliberately force CPU transcription.
+
+Find the AMD render node on the backend host: each
+`/sys/class/drm/renderD*/device/driver` symlink identifies its kernel driver.
+Use the node whose driver is `amdgpu` (it may be `renderD129` on a system with
+multiple GPUs). Its group ID comes from `stat -c '%g' /dev/dri/renderD128`, with
+the path changed to match your node. In `deploy/.env`, set:
+
+```dotenv
+HELIOS_RENDER_DEVICE=/dev/dri/renderD128
+HELIOS_RENDER_GID=992
+HELIOS_TRANSCRIBER_NO_GPU=false
+HELIOS_TRANSCRIBER_GPU_DEVICE=0
+HELIOS_TRANSCRIBER_DEFAULT_MODEL=large-v3
+HELIOS_TRANSCRIBER_THREADS=4
+HELIOS_WORKER_CONCURRENCY=1
+```
+
+`992` above is an example: use the actual host group ID. The override preserves the
+chosen node's path inside the container so RADV's sysfs discovery finds it, and
+adds its numeric group to the existing nonroot service user. No privileged mode or
+root user is needed. `VK_DRIVER_FILES` selects RADV only, preventing lavapipe software Vulkan
+from being mistaken for GPU acceleration. `HELIOS_TRANSCRIBER_GPU_DEVICE` is the
+whisper-cli GPU index, independent of the render node number.
+
+Fetch the default weights with `make models`, then use `make compose-up-vulkan`
+(equivalent to Compose with both `deploy/docker-compose.yml` and
+`deploy/docker-compose.vulkan.yml`). Keep both files in subsequent Compose
+operations that recreate containers. The ordinary base Compose remains usable on
+hosts without a GPU; `HELIOS_TRANSCRIBER_NO_GPU=true` forces the CPU path.
+
+Run `./scripts/check-vulkan.sh` after building to check RADV access as the service
+user. Pass a host WAV path, e.g. `./scripts/check-vulkan.sh /path/to/sample.wav`,
+to run a real transcription and require `using Vulkan0 backend` (or your selected
+index) in whisper-cli's diagnostics. Use a short mono 16 kHz PCM WAV readable by
+the container user. The check runs in a disposable container without touching
+the database or stored jobs. Inference output stays in that container's `/tmp`.
+
+The service's `/readyz` checks the binary and model files; it does not initialize
+the GPU. whisper.cpp may fall back to CPU when a GPU cannot initialize, so a
+healthy API alone does not prove Vulkan use. The audio smoke check verifies backend
+selection and catches this fallback. For GPU startup failures, check the render
+node, its group ID and the `vulkaninfo` output first. GPU indices that do not exist
+on the deployment host can only be detected at runtime.
+
+For a native deployment, build whisper.cpp v1.9.4 with the
+[documented Vulkan option](https://github.com/ggml-org/whisper.cpp/blob/v1.9.4/README.md#vulkan-gpu-support)
+and install its Vulkan SDK build dependencies (`libvulkan-dev`, `glslc`,
+`spirv-headers` on Ubuntu 24.04). The host also needs `libvulkan1`,
+`mesa-vulkan-drivers`, and render-node access for the service account. Set
+`HELIOS_TRANSCRIBER_BINARY` to that `whisper-cli`; the Go API needs no CGO changes.
 
 ## Running the stack
 

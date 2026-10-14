@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,6 +44,46 @@ func TestBuildTranscriber_selectsWhispercppByDefault(t *testing.T) {
 	tr := buildTranscriber(config.TranscriberConfig{Kind: "whispercpp", Binary: "whisper-cli"}, nil)
 	_, ok := tr.(*whispercpp.Transcriber)
 	assert.True(t, ok, "expected *whispercpp.Transcriber, got %T", tr)
+}
+
+func TestBuildTranscriber_forwardsGPUConfiguration(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		noGPU bool
+		want  string
+	}{
+		{"GPU device", false, "--device\n2\n"},
+		{"CPU", true, "--no-gpu\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "ggml-base.bin"), []byte("fake weights"), 0o644))
+			argsPath := filepath.Join(dir, "args.txt")
+			t.Setenv("WHISPER_TEST_ARGS_PATH", argsPath)
+			bin := filepath.Join(dir, "whisper-cli-stub.sh")
+			require.NoError(t, os.WriteFile(bin, []byte(`#!/usr/bin/env bash
+printf '%s\n' "$@" > "$WHISPER_TEST_ARGS_PATH"
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-of" ]; then
+    printf '%s' '{"result":{"language":"en"},"transcription":[]}' > "$2.json"
+    break
+  fi
+  shift
+done
+`), 0o755))
+			tr := buildTranscriber(config.TranscriberConfig{Kind: "whispercpp", Binary: bin, ModelDir: dir, NoGPU: tt.noGPU, GPUDevice: 2, Timeout: 5 * time.Second}, nil)
+			_, err := tr.Transcribe(context.Background(), domain.TranscribeRequest{AudioPath: filepath.Join(dir, "audio.wav"), Options: domain.Options{Model: "base", Task: domain.TaskTranscribe, BeamSize: 5}})
+			require.NoError(t, err)
+			args, err := os.ReadFile(argsPath)
+			require.NoError(t, err)
+			assert.Contains(t, string(args), tt.want)
+			if tt.noGPU {
+				assert.False(t, strings.Contains(string(args), "--device\n"))
+			} else {
+				assert.False(t, strings.Contains(string(args), "--no-gpu\n"))
+			}
+		})
+	}
 }
 
 func TestBuildTranscriber_selectsFakeWhenConfigured(t *testing.T) {

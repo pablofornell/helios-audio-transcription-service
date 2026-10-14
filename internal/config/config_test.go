@@ -35,7 +35,7 @@ func validConfig() *Config {
 			Kind:          "whispercpp",
 			Binary:        "whisper-cli",
 			ModelDir:      "/models",
-			DefaultModel:  "base",
+			DefaultModel:  "large-v3",
 			AllowedModels: []string{"tiny", "base", "small", "medium", "large-v3"},
 			Threads:       4,
 			Timeout:       30 * time.Minute,
@@ -437,9 +437,11 @@ func TestLoad_AllDefaults(t *testing.T) {
 	assert.Equal(t, "whispercpp", cfg.Transcriber.Kind)
 	assert.Equal(t, "whisper-cli", cfg.Transcriber.Binary)
 	assert.Equal(t, "/models", cfg.Transcriber.ModelDir)
-	assert.Equal(t, "base", cfg.Transcriber.DefaultModel)
+	assert.Equal(t, "large-v3", cfg.Transcriber.DefaultModel)
 	assert.Equal(t, []string{"tiny", "base", "small", "medium", "large-v3"}, cfg.Transcriber.AllowedModels)
 	assert.Equal(t, 4, cfg.Transcriber.Threads)
+	assert.False(t, cfg.Transcriber.NoGPU)
+	assert.Equal(t, 0, cfg.Transcriber.GPUDevice)
 	assert.Equal(t, 30*time.Minute, cfg.Transcriber.Timeout)
 
 	assert.Equal(t, "ffmpeg", cfg.Audio.FFmpegBinary)
@@ -511,6 +513,24 @@ func TestLoad_MalformedBool(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "HELIOS_DATABASE_AUTO_MIGRATE")
 	assert.Contains(t, err.Error(), "sure")
+}
+
+func TestLoad_GPUConfigurationInvalidValues(t *testing.T) {
+	for _, tt := range []struct {
+		name, envVar, value, wantError string
+	}{
+		{"malformed no GPU", "HELIOS_TRANSCRIBER_NO_GPU", "maybe", "HELIOS_TRANSCRIBER_NO_GPU"},
+		{"malformed device", "HELIOS_TRANSCRIBER_GPU_DEVICE", "first", "HELIOS_TRANSCRIBER_GPU_DEVICE"},
+		{"negative device", "HELIOS_TRANSCRIBER_GPU_DEVICE", "-1", "GPU device must be >= 0"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(tt.envVar, tt.value)
+			cfg, err := Load()
+			assert.Nil(t, cfg)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantError)
+		})
+	}
 }
 
 func TestLoad_SeveralMalformedValuesAllReported(t *testing.T) {
@@ -613,6 +633,8 @@ func TestLoad_FullCustomEnvironment(t *testing.T) {
 		"HELIOS_TRANSCRIBER_DEFAULT_MODEL":     "small",
 		"HELIOS_TRANSCRIBER_ALLOWED_MODELS":    "small,medium",
 		"HELIOS_TRANSCRIBER_THREADS":           "8",
+		"HELIOS_TRANSCRIBER_NO_GPU":            "true",
+		"HELIOS_TRANSCRIBER_GPU_DEVICE":        "2",
 		"HELIOS_TRANSCRIBER_TIMEOUT":           "5m",
 		"HELIOS_AUDIO_FFMPEG_BINARY":           "/usr/local/bin/ffmpeg",
 		"HELIOS_AUDIO_FFPROBE_BINARY":          "/usr/local/bin/ffprobe",
@@ -672,6 +694,8 @@ func TestLoad_FullCustomEnvironment(t *testing.T) {
 		DefaultModel:  "small",
 		AllowedModels: []string{"small", "medium"},
 		Threads:       8,
+		NoGPU:         true,
+		GPUDevice:     2,
 		Timeout:       5 * time.Minute,
 	}, cfg.Transcriber)
 

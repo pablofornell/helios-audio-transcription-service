@@ -5,7 +5,7 @@
 #
 #   ./scripts/fetch-models.sh [model ...]
 #
-# With no arguments, it fetches "base" -- HELIOS_TRANSCRIBER_DEFAULT_MODEL's
+# With no arguments, it fetches "large-v3" -- HELIOS_TRANSCRIBER_DEFAULT_MODEL's
 # own default -- so a fresh checkout has something to transcribe with. Any
 # number of model names may be given instead, each one of
 # HELIOS_TRANSCRIBER_ALLOWED_MODELS' default set (tiny, base, small, medium,
@@ -26,7 +26,7 @@ base_url="https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
 
 models=("$@")
 if [ ${#models[@]} -eq 0 ]; then
-	models=("base")
+	models=("large-v3")
 fi
 
 mkdir -p "${models_dir}"

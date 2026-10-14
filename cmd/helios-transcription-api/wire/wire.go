@@ -364,6 +364,8 @@ func buildTranscriber(cfg config.TranscriberConfig, override app.Transcriber) ap
 		ModelDir:     cfg.ModelDir,
 		DefaultModel: cfg.DefaultModel,
 		Threads:      cfg.Threads,
+		NoGPU:        cfg.NoGPU,
+		GPUDevice:    cfg.GPUDevice,
 		Timeout:      cfg.Timeout,
 	})
 }

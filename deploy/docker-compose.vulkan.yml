@@ -1,0 +1,17 @@
+# Linux AMD GPU override. Use together with docker-compose.yml.
+# Set HELIOS_RENDER_DEVICE and HELIOS_RENDER_GID for the AMD render node on
+# the host (stat -c '%g' /dev/dri/renderD128); no privileged container needed.
+services:
+  helios:
+    devices:
+      # Preserve the path: RADV discovers render nodes through host sysfs.
+      - ${HELIOS_RENDER_DEVICE:-/dev/dri/renderD128}:${HELIOS_RENDER_DEVICE:-/dev/dri/renderD128}
+    group_add:
+      - "${HELIOS_RENDER_GID:?Set HELIOS_RENDER_GID to the host AMD render node group ID}"
+    environment:
+      # Select RADV only: don't silently transcribe using software Vulkan.
+      VK_DRIVER_FILES: /etc/vulkan/icd.d/helios-radv.json
+      HELIOS_TRANSCRIBER_NO_GPU: ${HELIOS_TRANSCRIBER_NO_GPU:-false}
+      HELIOS_TRANSCRIBER_GPU_DEVICE: ${HELIOS_TRANSCRIBER_GPU_DEVICE:-0}
+      # One model/process at a time shares the iGPU's system memory.
+      HELIOS_WORKER_CONCURRENCY: ${HELIOS_WORKER_CONCURRENCY:-1}

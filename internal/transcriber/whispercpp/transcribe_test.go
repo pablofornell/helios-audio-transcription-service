@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,6 +86,43 @@ func TestTranscribe_success(t *testing.T) {
 	assert.Equal(t, "base", got.Model)
 	assert.Equal(t, domain.TaskTranscribe, got.Task)
 	assert.Equal(t, "Hello there. How are you?", got.Text)
+}
+
+func TestTranscribe_forwardsGPUConfiguration(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		noGPU  bool
+		device int
+		want   []string
+	}{
+		{"default GPU", false, 0, []string{"--device", "0"}},
+		{"selected GPU", false, 2, []string{"--device", "2"}},
+		{"CPU", true, 2, []string{"--no-gpu"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			modelDir := t.TempDir()
+			newModel(t, modelDir, "base")
+			argsPath := filepath.Join(t.TempDir(), "args.txt")
+			t.Setenv("WHISPER_TEST_ARGS_PATH", argsPath)
+			script := strings.Replace(stubThatWritesOutput(sampleOJ), "of=\"\"", "printf '%s\\n' \"$@\" > \"$WHISPER_TEST_ARGS_PATH\"\nof=\"\"", 1)
+			tr := New(Config{Binary: writeScript(t, script), ModelDir: modelDir, NoGPU: tt.noGPU, GPUDevice: tt.device, Timeout: 5 * time.Second})
+			req := domain.TranscribeRequest{AudioPath: newAudioPath(t), Options: domain.Options{Model: "base", Task: domain.TaskTranscribe, BeamSize: 5}}
+			_, err := tr.Transcribe(context.Background(), req)
+			require.NoError(t, err)
+			data, err := os.ReadFile(argsPath)
+			require.NoError(t, err)
+			args := strings.Split(strings.TrimSpace(string(data)), "\n")
+			i := indexOf(args, tt.want[0])
+			require.GreaterOrEqual(t, i, 0)
+			require.LessOrEqual(t, i+len(tt.want), len(args))
+			assert.Equal(t, tt.want, args[i:i+len(tt.want)])
+			if tt.noGPU {
+				assert.NotContains(t, args, "--device")
+			} else {
+				assert.NotContains(t, args, "--no-gpu")
+			}
+		})
+	}
 }
 
 func TestTranscribe_perJobTempDirIsCleanedUp(t *testing.T) {
