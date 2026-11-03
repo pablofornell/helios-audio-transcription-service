@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import styles from "./Select.module.css";
 
 export interface SelectOption {
@@ -18,6 +18,18 @@ export interface SelectProps {
 }
 
 const TYPEAHEAD_RESET_MS = 600;
+/** Gap between trigger and listbox; matches `.listbox`'s `top`/`bottom` offset. */
+const LISTBOX_GAP = 4;
+/** Minimum breathing room from the viewport edge (`--space-2`). */
+const VIEWPORT_MARGIN = 8;
+
+interface Placement {
+  above: boolean;
+  alignEnd: boolean;
+  maxHeight?: number;
+}
+
+const DEFAULT_PLACEMENT: Placement = { above: false, alignEnd: false };
 
 /**
  * Select — DESIGN.md §6.4 and Coordinator ruling §4.
@@ -40,6 +52,7 @@ const TYPEAHEAD_RESET_MS = 600;
 export function Select({ options, value, onChange, label, placeholder = "Select…", disabled = false, className }: SelectProps) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [placement, setPlacement] = useState<Placement>(DEFAULT_PLACEMENT);
   const baseId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listboxRef = useRef<HTMLUListElement>(null);
@@ -61,6 +74,28 @@ export function Select({ options, value, onChange, label, placeholder = "Select�
     const id = requestAnimationFrame(() => listboxRef.current?.focus());
     return () => cancelAnimationFrame(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Runs before paint, so a listbox that has to flip never flashes on the wrong
+  // side. Opens down and rightward when it fits, otherwise towards the side
+  // with more room, capped to that room so it never runs past the viewport.
+  useLayoutEffect(() => {
+    if (!open) {
+      setPlacement(DEFAULT_PLACEMENT);
+      return;
+    }
+    const trigger = triggerRef.current?.getBoundingClientRect();
+    const listbox = listboxRef.current?.getBoundingClientRect();
+    if (!trigger || !listbox) return;
+    const roomBelow = window.innerHeight - trigger.bottom - LISTBOX_GAP - VIEWPORT_MARGIN;
+    const roomAbove = trigger.top - LISTBOX_GAP - VIEWPORT_MARGIN;
+    const above = listbox.height > roomBelow && roomAbove > roomBelow;
+    const room = above ? roomAbove : roomBelow;
+    setPlacement({
+      above,
+      alignEnd: trigger.left + listbox.width > window.innerWidth - VIEWPORT_MARGIN && trigger.right - listbox.width >= VIEWPORT_MARGIN,
+      maxHeight: listbox.height > room ? Math.max(room, 0) : undefined,
+    });
   }, [open]);
 
   useEffect(() => {
@@ -180,7 +215,8 @@ export function Select({ options, value, onChange, label, placeholder = "Select�
           tabIndex={-1}
           aria-label={label}
           aria-activedescendant={options.length ? optionId(activeIndex) : undefined}
-          className={styles.listbox}
+          className={[styles.listbox, placement.above ? styles.above : "", placement.alignEnd ? styles.alignEnd : ""].filter(Boolean).join(" ")}
+          style={placement.maxHeight === undefined ? undefined : ({ maxHeight: placement.maxHeight } satisfies CSSProperties)}
           onKeyDown={onListboxKeyDown}
         >
           {options.map((option, index) => (

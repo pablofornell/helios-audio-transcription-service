@@ -45,8 +45,13 @@
   z-index: var(--z-menu);
   top: calc(100% + 4px);
   left: 0;
+  /* Size to the longest label: an absolutely positioned box otherwise shrinks
+     to its containing block (the trigger) and wraps the options. */
+  width: max-content;
   min-width: 100%;
-  max-height: calc(8 * 28px + 8px);
+  max-width: calc(100vw - 2 * var(--space-2));
+  max-height: calc(8 * var(--control-h-md) + 8px);
+  overflow-x: hidden;
   overflow-y: auto;
   margin: 0;
   padding: 4px;
@@ -54,6 +59,27 @@
   background: var(--bg-raised);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-2);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+/* WebKitGTK (the Linux desktop shell) styles scrollbars through these. */
+.listbox::-webkit-scrollbar {
+  width: 8px;
+}
+.listbox::-webkit-scrollbar-track {
+  background: transparent;
+}
+.listbox::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-full);
+}
+.listbox.above {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+.listbox.alignEnd {
+  left: auto;
+  right: 0;
 }
 .listbox:focus-visible,
 .listbox:focus {
@@ -61,13 +87,15 @@
 }
 
 .option {
-  display: flex;
-  align-items: center;
-  height: 28px;
-  padding: 0 var(--space-2);
+  height: var(--control-h-md);
+  padding: 0 var(--space-3);
   border-radius: var(--radius-sm);
   font-size: var(--fs-300);
+  line-height: var(--control-h-md);
   color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: default;
 }
 
