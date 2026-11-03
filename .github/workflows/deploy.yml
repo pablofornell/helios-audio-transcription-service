@@ -1,0 +1,49 @@
+# Push-to-deploy for helios-ats on the self-hosted runner "hef-ci" (LAN), generated from ci-kit workflows/deploy.yml.tmpl.
+#
+# GUARD: this workflow must NEVER get a pull_request / pull_request_target / workflow_run / ... trigger. A self-hosted
+# runner on the LAN would execute code from a PR. workflows/check-workflow.sh fails if one appears.
+name: deploy-helios-ats
+
+on:
+  push:
+    branches: [main]
+    # A push whose changed files are ALL under .github/ does not run this workflow; a push that also touches
+    # anything else does. (GitHub skips only when EVERY changed path matches paths-ignore.)
+    paths-ignore: ['.github/**']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build only: stop after the build and report, deploy nothing'
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-helios-ats
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    # Pushes deploy; a manual run deploys only from main, other branches may only dry-run.
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || inputs.dry_run)) }}
+    runs-on: [self-hosted, hef-ci]
+    timeout-minutes: 45
+    steps:
+      # actions/checkout v7.0.1 (resolved with `gh api` on 2026-11-03; pinned to the full commit SHA).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          # Enable ONLY if the app's recipe needs them:
+          # submodules: recursive
+          # lfs: true
+
+      - name: Build, ship and deploy helios-ats
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "${DRY_RUN:-false}" = "true" ]; then args+=(--dry-run); fi
+          /opt/ci/bin/ci-deploy helios-ats "$GITHUB_WORKSPACE" "$GITHUB_SHA" ${args[@]+"${args[@]}"}
