@@ -254,3 +254,33 @@ describe("Priority badge and wait text", () => {
     expect(screen.getByText(/last update/)).toBeInTheDocument();
   });
 });
+
+describe("Enter key on a row", () => {
+  it("does not open the Library when Enter is pressed on the Priority processing button", () => {
+    const onOpenLibrary = vi.fn();
+    const prioritize = vi.fn();
+    renderRows([row("one", "pending", "2026-10-01T00:00:00Z")], { onOpenLibrary, prioritize });
+    const button = screen.getByRole("button", { name: "Priority processing" });
+    // fireEvent returns false when a handler called preventDefault: the click would not happen.
+    expect(fireEvent.keyDown(button, { key: "Enter" })).toBe(true);
+    expect(onOpenLibrary).not.toHaveBeenCalled();
+  });
+  it.each(["Cancel", "More actions"])("does not open the Library when Enter is pressed on %s", (name) => {
+    const onOpenLibrary = vi.fn();
+    renderRows([row("one", "pending", "2026-10-01T00:00:00Z"), row("two", "failed", "2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z")], { onOpenLibrary });
+    expect(fireEvent.keyDown(screen.getAllByRole("button", { name })[0], { key: "Enter" })).toBe(true);
+    expect(onOpenLibrary).not.toHaveBeenCalled();
+  });
+  it("does not open the Library when Enter is pressed on Retry", () => {
+    const onOpenLibrary = vi.fn();
+    renderRows([failedWith("missing-model", "model_unavailable")], { onOpenLibrary });
+    expect(fireEvent.keyDown(screen.getByRole("button", { name: "Retry" }), { key: "Enter" })).toBe(true);
+    expect(onOpenLibrary).not.toHaveBeenCalled();
+  });
+  it("still opens the Library when Enter is pressed on the row itself", () => {
+    const onOpenLibrary = vi.fn();
+    renderRows([row("one", "pending", "2026-10-01T00:00:00Z")], { onOpenLibrary, prioritize: vi.fn() });
+    fireEvent.keyDown(screen.getByRole("listitem"), { key: "Enter" });
+    expect(onOpenLibrary).toHaveBeenCalledWith("one");
+  });
+});

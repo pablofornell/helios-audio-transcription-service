@@ -356,6 +356,16 @@ func (s *Store) ReleaseForShutdown(ctx context.Context, id, leaseToken string) e
 // away was pure waste. The candidate CTE both bounds the batch (LIMIT
 // purgeBatchLimit, oldest first) and is what makes the transcriptions_retention_idx
 // partial index (see migration 00002) usable instead of a sequential scan.
+//
+// The DELETE repeats the status and completed_at tests on t, not only
+// t.id = c.id. The candidate CTE has no row lock, so another transaction can
+// change a candidate row (Prioritize or Requeue make it pending again) while
+// the DELETE waits for that row. Under READ COMMITTED, Postgres then
+// rechecks the quals of t on the new version of the row. With the repeated
+// tests, the recheck fails and the DELETE skips the row. Without them, it
+// would delete a row that is pending again, and the caller would remove its
+// files. The sweeper removes files only for the rows that RETURNING gives
+// back, so a skipped row keeps its files.
 func (s *Store) PurgeTerminalBefore(ctx context.Context, cutoff time.Time) ([]domain.PurgedTranscription, error) {
 	rows, err := s.pool.Query(ctx, `
 		WITH candidate AS (
@@ -367,6 +377,7 @@ func (s *Store) PurgeTerminalBefore(ctx context.Context, cutoff time.Time) ([]do
 		DELETE FROM transcriptions AS t
 		USING candidate AS c
 		WHERE t.id = c.id
+		  AND t.status IN ('succeeded', 'failed', 'canceled') AND t.completed_at < $1
 		RETURNING t.id::text, t.source_path`,
 		cutoff,
 	)

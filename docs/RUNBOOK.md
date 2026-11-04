@@ -421,7 +421,10 @@ leaves the job no attempt. A job that fails with a retryable error keeps its pri
 for its next attempt, but only until `max_attempts`. A job that waits for its retry
 delay is not due, so other jobs run in the meantime. To check the claim order, run
 `EXPLAIN` on the `Claim` query: it must use `transcriptions_pending_priority_claim_idx`
-and must not have a `Sort` node.
+and must not have a `Sort` node. This check needs a real backlog (thousands of pending
+rows) and fresh statistics (run `ANALYZE transcriptions` first). On an empty or small
+table, or before `ANALYZE`, the planner can choose a sequential scan with a sort, and
+the check gives a false alarm.
 
 ## Backup and restore
 

@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useId, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { IconButton, Menu, ProgressBar, Row, StatusPill, useContextMenu, type MenuItem } from "../../components";
 import {
   displayStatus as computeDisplayStatus,
@@ -99,7 +99,9 @@ export function QueueRow({ model, canceling, entering, stale, now, onCancel, onR
       tabIndex={0}
       data-row-key={model.key}
       onKeyDown={(e) => {
-        if (e.key === "Enter" && onOpenLibrary) {
+        // Enter on a button, link or menu item inside the row must do the
+        // action of that control. The row handler must not cancel its click.
+        if (e.key === "Enter" && onOpenLibrary && !isFromInteractiveChild(e)) {
           e.preventDefault();
           open();
         }
@@ -142,6 +144,13 @@ export function QueueRow({ model, canceling, entering, stale, now, onCancel, onR
       lane={<ProgressBar mode={laneMode} value={laneValue} label={title} />}
     />
   );
+}
+
+const INTERACTIVE_SELECTOR = "button, a[href], input, select, textarea, [role='button'], [role='menuitem']";
+
+/** True when a key event started in a control inside the row, not on the row itself. */
+function isFromInteractiveChild(e: KeyboardEvent<HTMLElement>): boolean {
+  return e.target !== e.currentTarget && e.target instanceof Element && e.target.closest(INTERACTIVE_SELECTOR) !== null;
 }
 
 function AudioGlyph() {

@@ -294,8 +294,10 @@ func (s *Store) Requeue(ctx context.Context, id string) (*domain.Transcription, 
 //     go back to their values for a new run.
 //   - result, audio and source_path do not change. A pending or failed row
 //     has no result. The stored source file stays on disk, so the new
-//     attempt reads it. The retention sweep purges terminal rows only, and
-//     this row is pending after the call.
+//     attempt reads it. This row is pending after the call, so the retention
+//     sweep does not purge it. If a sweep already selected the row, its
+//     DELETE rechecks the status and completed_at on the new version of the
+//     row and skips it (see PurgeTerminalBefore).
 //
 // The UPDATE also does three things that Requeue does not:
 //

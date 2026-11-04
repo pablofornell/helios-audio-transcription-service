@@ -242,6 +242,9 @@ describe("transcriptionStore — poll cadence", () => {
  * A fake server like the real one: rows are newest first, and a cursor holds
  * the position (`createdAt` and id) of the last row served. A cursor still
  * works after that row is deleted. Tests change `server.rows` at any time.
+ * A request reads the rows when it starts, so a request that waits on
+ * `server.gate` answers with the rows of the time it started, as a slow
+ * network call does.
  */
 function fakeServer(initial: Transcription[]) {
   const server = {
@@ -251,8 +254,9 @@ function fakeServer(initial: Transcription[]) {
   };
   listImpl = async (filter) => {
     server.requests.push(filter);
+    const rows = server.rows;
     if (server.gate) await server.gate;
-    const matching = server.rows.filter((t) => !filter.status || t.status === filter.status);
+    const matching = rows.filter((t) => !filter.status || t.status === filter.status);
     let start = 0;
     if (filter.cursor) {
       const [createdAt, id] = filter.cursor.split("|");
@@ -463,10 +467,11 @@ describe("transcriptionStore — reach beyond one page", () => {
     let open!: () => void;
     server.gate = new Promise<void>((resolve) => { open = resolve; });
     transcriptionStore.refreshNow(); // a walk that still holds the old row
+    // The server changes the row after the held walk has read the old one.
     const updated = { ...server.rows[1], priorityAt: "2026-11-04T10:00:00Z" };
+    server.rows = [server.rows[0], updated];
     transcriptionStore.upsert(updated);
     expect(priorityAt("t-1")).toBe("2026-11-04T10:00:00Z");
-    server.rows = [server.rows[0], updated];
     server.gate = undefined;
     open();
     await vi.advanceTimersByTimeAsync(0);

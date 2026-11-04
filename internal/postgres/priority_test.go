@@ -664,3 +664,63 @@ func TestMigration00003_DownThenUp(t *testing.T) {
 	assert.Equal(t, 1, count(columns))
 	assert.Equal(t, 1, count(indexes))
 }
+
+// TestStore_PurgeTerminalBefore_SkipsRowPrioritizedWhileDeleteWaits
+// reproduces a race between the retention sweep and Prioritize on two
+// connections. Connection A updates a failed row to pending, as Prioritize
+// does, and holds the row lock. The purge starts on a second connection: its
+// candidate query still sees the old version, so the DELETE waits for the
+// lock. When A commits, the DELETE rechecks the new version and must skip the
+// row. If it deletes the row, the user loses a job after a 202 answer.
+func TestStore_PurgeTerminalBefore_SkipsRowPrioritizedWhileDeleteWaits(t *testing.T) {
+	requireDocker(t)
+	truncateAll(t)
+	store := New(testPool)
+	ctx := context.Background()
+
+	id := failOnly(t, store, domain.ErrCodeToolFailure)
+
+	tx, err := testPool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+	_, err = tx.Exec(ctx, `
+		UPDATE transcriptions
+		SET status = 'pending', attempts = 0, error = NULL, next_attempt_at = now(),
+		    priority_at = now(), started_at = NULL, completed_at = NULL, updated_at = now()
+		WHERE id = $1`, id)
+	require.NoError(t, err)
+
+	type result struct {
+		purged []domain.PurgedTranscription
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		purged, err := store.PurgeTerminalBefore(ctx, time.Now().UTC().Add(time.Hour))
+		done <- result{purged, err}
+	}()
+
+	// Wait until the DELETE waits for the row lock held by the transaction.
+	require.Eventually(t, func() bool {
+		var n int
+		require.NoError(t, testPool.QueryRow(ctx, `
+			SELECT count(*) FROM pg_stat_activity
+			WHERE wait_event_type = 'Lock' AND query LIKE '%DELETE FROM transcriptions%'`).Scan(&n))
+		return n > 0
+	}, 10*time.Second, 10*time.Millisecond, "the purge must wait for the row lock")
+	select {
+	case r := <-done:
+		t.Fatalf("the purge finished before the lock was released: %+v", r)
+	default:
+	}
+
+	require.NoError(t, tx.Commit(ctx))
+	r := <-done
+	require.NoError(t, r.err)
+	assert.Empty(t, r.purged, "a row that is pending again must not be purged")
+
+	got, err := store.Get(ctx, id)
+	require.NoError(t, err, "the row must still exist")
+	assert.Equal(t, domain.StatusPending, got.Status)
+	assert.NotNil(t, got.PriorityAt)
+}
