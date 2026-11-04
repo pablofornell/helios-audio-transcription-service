@@ -31,13 +31,16 @@ const maxScanLine = 4 * 1024
 // Detection tuning. whisper.cpp reads only the first 30 s window of its
 // input for language detection, and the model is unsure when that window
 // holds no speech: real runs of 35 s of silence before French audio gave
-// "en" with p = 0.354, while normal speech gave p = 0.969 to 0.999.
+// "en" with p = 0.354, and 35 s of a synthetic tone before French gave "en"
+// with p = 0.749, while normal speech gave p = 0.969 to 0.999.
 const (
 	// detectWindow is the length of the clip cut for one detection run.
 	detectWindow = 30 * time.Second
 	// lowConfidence is the probability under which the service looks at
-	// later windows of the audio.
-	lowConfidence = 0.5
+	// later windows of the audio. A probability equal to it is confident.
+	// It sits between the wrong answers measured on audio without speech
+	// (up to 0.749) and the normal speech answers (0.969 and more).
+	lowConfidence = 0.9
 	// silenceFilter removes the silence before the first sound. ffmpeg
 	// keeps 0.3 s of it.
 	silenceFilter = "silenceremove=start_periods=1:start_threshold=-45dB:start_duration=0.1:start_silence=0.3"

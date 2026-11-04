@@ -196,7 +196,7 @@ that produced the text) and `task` (what the engine did).
 
 Detection works on a clip of up to 30 seconds (the most `whisper-cli` reads) from which
 the leading silence is removed with `ffmpeg`. If the probability of the answer is low
-(under 0.5), the service also tries clips at one third and two thirds of the audio and
+(under 0.9), the service also tries clips at one third and two thirds of the audio and
 keeps the most probable answer. It never fails a job for low confidence, because audio
 without speech is valid. The log line `whispercpp: language detected` shows the chosen
 language, its probability and the window. Audio that changes language later than these

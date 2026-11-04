@@ -71,6 +71,15 @@ done
 `
 }
 
+// stubFFmpeg returns a fake ffmpeg that fails at once, so the detection uses
+// the audio as it is. A test with a tight timeout or cancel needs it: the
+// real ffmpeg can take longer than the test waits when the machine is
+// loaded, and then the cancel fires before the whisper-cli stub starts.
+func stubFFmpeg(t *testing.T) string {
+	t.Helper()
+	return writeScript(t, "#!/usr/bin/env bash\nexit 1\n")
+}
+
 // stubThatWritesOutput returns a whisper-cli stub script that locates its
 // own "-of <base>" argument and writes json to "<base>.json" before
 // exiting 0 — the shape every success-path test needs. It answers a
@@ -271,7 +280,7 @@ func TestTranscribe_timeout(t *testing.T) {
 	newModel(t, modelDir, "large-v3-turbo-q5_0")
 	bin := writeScript(t, "#!/usr/bin/env bash\nsleep 5\n")
 
-	tr := New(Config{Binary: bin, ModelDir: modelDir, Timeout: 200 * time.Millisecond})
+	tr := New(Config{Binary: bin, FFmpegBinary: stubFFmpeg(t), ModelDir: modelDir, Timeout: 200 * time.Millisecond})
 	req := domain.TranscribeRequest{AudioPath: newAudioPath(t), Options: domain.Options{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe, BeamSize: 5}}
 
 	start := time.Now()
@@ -293,7 +302,7 @@ echo "$!" > `+childPIDFile+`
 sleep 5
 `)
 
-	tr := New(Config{Binary: bin, ModelDir: modelDir, Timeout: 10 * time.Second})
+	tr := New(Config{Binary: bin, FFmpegBinary: stubFFmpeg(t), ModelDir: modelDir, Timeout: 10 * time.Second})
 	req := domain.TranscribeRequest{AudioPath: newAudioPath(t), Options: domain.Options{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe, BeamSize: 5}}
 
 	ctx, cancel := context.WithCancel(context.Background())

@@ -439,6 +439,31 @@ func TestTranscribe_detectionRunsOnClipWithLeadingSilenceRemoved(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(strings.Join(ff[0], " "), "-i "))
 }
 
+// The boundary of lowConfidence (0.9). 35 s of a tone before French gave "en"
+// with p = 0.749 on the real binary. Normal speech gave 0.969 and more.
+func TestTranscribe_lowConfidenceBoundary(t *testing.T) {
+	for _, tt := range []struct {
+		prob       string
+		wantClips  int
+		wantDetect int
+	}{
+		{"0.749", 3, 3}, // the tone case: looks at all windows
+		{"0.899", 3, 3}, // just under the boundary
+		{"0.900", 1, 1}, // at the boundary: confident
+		{"0.969", 1, 1}, // a normal clip
+	} {
+		t.Run("p="+tt.prob, func(t *testing.T) {
+			f := newLangFixture(t, detectsWith("en", tt.prob), false)
+			f.useLongAudio(90)
+
+			_, err := f.transcriber(5*time.Second).Transcribe(context.Background(), f.request("", domain.TaskTranscribe))
+			require.NoError(t, err)
+			assert.Len(t, f.ffmpegCalls(), tt.wantClips)
+			assert.Len(t, f.calls(), tt.wantDetect+1, "detections plus one transcription")
+		})
+	}
+}
+
 func TestTranscribe_confidentFirstWindowStopsAtOneDetection(t *testing.T) {
 	f := newLangFixture(t, detectsWith("fr", "0.969"), true)
 	f.useLongAudio(90)

@@ -175,7 +175,7 @@ never on the HTTP request path:
    `whisper-cli` steps in order. First, `whisper-cli -dl` detects the audio language.
    The request never sets it: `Options.Language` is ignored. Detection runs on a clip
    (up to 30 s) cut with `ffmpeg` from the start of the audio with the leading silence
-   removed. If the probability is under 0.5, it also tries clips at one third and two
+   removed. If the probability is under 0.9, it also tries clips at one third and two
    thirds of the audio and keeps the most probable answer. A low probability never
    fails a job. Then `domain.PlanOutput` applies the language rule: Spanish stays
    Spanish, English stays English, any other language becomes English by translation
