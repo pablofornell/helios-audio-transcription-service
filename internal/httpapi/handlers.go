@@ -400,6 +400,19 @@ func (h *handlers) retryTranscription(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, transcriptionFromDomain(t))
 }
 
+// prioritizeTranscription implements POST /api/v1/transcriptions/{id}/prioritize.
+// It answers 202: the job starts a new attempt when a worker slot is free.
+func (h *handlers) prioritizeTranscription(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	t, err := h.service.Prioritize(r.Context(), id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, transcriptionFromDomain(t))
+}
+
 // getTranscript implements GET /api/v1/transcriptions/{id}/transcript.
 // The requested format is validated before the transcription is even
 // looked up, so an unknown `format` is rejected the same way regardless of

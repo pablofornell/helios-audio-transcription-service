@@ -394,6 +394,17 @@ func (s *Service) Retry(ctx context.Context, id string) (*domain.Transcription, 
 	return s.repo.Requeue(ctx, id)
 }
 
+// Prioritize puts the transcription with the given id first in the queue,
+// delegating to Repository.Prioritize. The job starts a new attempt when a
+// worker slot is free. Prioritize surfaces ErrCodeConflict unchanged unless
+// the job is pending or failed.
+func (s *Service) Prioritize(ctx context.Context, id string) (*domain.Transcription, error) {
+	if err := validateID(id); err != nil {
+		return nil, err
+	}
+	return s.repo.Prioritize(ctx, id)
+}
+
 // OpenSource returns a seekable reader over the transcription's originally
 // uploaded source file, alongside the transcription itself so the caller
 // (internal/httpapi) can set a filename and content type without a second

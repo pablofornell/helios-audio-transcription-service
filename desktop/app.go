@@ -191,6 +191,16 @@ func (a *App) Retry(id string) (TranscriptionDTO, error) {
 	return transcriptionFromDomain(t), nil
 }
 
+// Prioritize puts a pending or failed transcription first in the queue. See
+// transcriptionAPI.Prioritize.
+func (a *App) Prioritize(id string) (TranscriptionDTO, error) {
+	t, err := a.api.Prioritize(a.runtimeCtx(), id)
+	if err != nil {
+		return TranscriptionDTO{}, err
+	}
+	return transcriptionFromDomain(t), nil
+}
+
 // Cancel requests that a pending or running transcription stop. See
 // transcriptionAPI.Cancel.
 func (a *App) Cancel(id string) error {

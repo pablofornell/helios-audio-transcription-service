@@ -44,6 +44,12 @@ type Repository interface {
 	// Requeue puts a failed or canceled job back on the queue with a fresh
 	// attempt count. Returns ErrCodeConflict from any other status.
 	Requeue(ctx context.Context, id string) (*domain.Transcription, error)
+	// Prioritize moves a pending or failed job to the head of the queue:
+	// it resets the attempts, the error and the backoff, and sets
+	// PriorityAt, so Claim takes the job before all others. Returns
+	// ErrCodeConflict from any other status, and ErrCodeNotFound for an
+	// unknown id.
+	Prioritize(ctx context.Context, id string) (*domain.Transcription, error)
 }
 
 // Queue is the worker-facing half of persistence: a lease-based job queue

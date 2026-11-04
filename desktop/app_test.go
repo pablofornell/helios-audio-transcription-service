@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -151,6 +152,42 @@ func TestApp_Retry(t *testing.T) {
 	}
 	if got.ID != "t-1" {
 		t.Errorf("Retry returned ID %q, want %q", got.ID, "t-1")
+	}
+}
+
+func TestApp_Prioritize(t *testing.T) {
+	at := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
+	api := &fakeAPI{
+		prioritizeFunc: func(ctx context.Context, id string) (*domain.Transcription, error) {
+			tr := transcriptionFor(id)
+			tr.PriorityAt = &at
+			return tr, nil
+		},
+	}
+	a := &App{api: api}
+
+	got, err := a.Prioritize("t-1")
+	if err != nil {
+		t.Fatalf("Prioritize: %v", err)
+	}
+	if got.ID != "t-1" {
+		t.Errorf("Prioritize returned ID %q, want %q", got.ID, "t-1")
+	}
+	if got.PriorityAt == nil || !got.PriorityAt.Equal(at) {
+		t.Errorf("Prioritize returned PriorityAt %v, want %v", got.PriorityAt, at)
+	}
+}
+
+func TestApp_Prioritize_PropagatesError(t *testing.T) {
+	api := &fakeAPI{
+		prioritizeFunc: func(ctx context.Context, id string) (*domain.Transcription, error) {
+			return nil, domain.New(domain.ErrCodeConflict, "not pending or failed")
+		},
+	}
+	a := &App{api: api}
+
+	if _, err := a.Prioritize("t-1"); domain.CodeOf(err) != domain.ErrCodeConflict {
+		t.Errorf("Prioritize error code = %q, want %q", domain.CodeOf(err), domain.ErrCodeConflict)
 	}
 }
 

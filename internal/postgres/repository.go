@@ -216,6 +216,8 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 // RequestCancel sets cancel_requested and, when the job is still pending,
 // moves it straight to domain.StatusCanceled -- no worker will ever claim a
 // pending row again once this commits, so there is nothing left to notify.
+// That move is terminal, so it clears priority_at. A running job keeps its
+// priority_at until its worker calls Queue.Finish, which clears it.
 // A running job is left running: its worker discovers the request at its
 // next Queue.Heartbeat call and finishes the transition itself. A job that
 // is already terminal returns ErrCodeConflict.
@@ -227,6 +229,7 @@ func (s *Store) RequestCancel(ctx context.Context, id string) (*domain.Transcrip
 		    lease_owner = CASE WHEN status = 'pending' THEN NULL ELSE lease_owner END,
 		    lease_expires_at = CASE WHEN status = 'pending' THEN NULL ELSE lease_expires_at END,
 		    completed_at = CASE WHEN status = 'pending' THEN now() ELSE completed_at END,
+		    priority_at = CASE WHEN status = 'pending' THEN NULL ELSE priority_at END,
 		    updated_at = now()
 		WHERE id = $1 AND status IN ('pending', 'running')
 		RETURNING `+transcriptionColumns,
@@ -278,8 +281,70 @@ func (s *Store) Requeue(ctx context.Context, id string) (*domain.Transcription, 
 	return nil, s.notFoundOrConflict(ctx, id, "transcription %s is not failed or canceled")
 }
 
+// Prioritize moves a pending or failed transcription to the head of the
+// queue and starts it from a clean retry state. It rejects a running,
+// succeeded or canceled row with ErrCodeConflict, and an unknown id with
+// ErrCodeNotFound. It also rejects a pending row that has cancel_requested
+// set: the next ReleaseExpired sweep cancels that row.
+//
+// One UPDATE does all of this on the row of id. The cleanup is the same as
+// in Requeue:
+//
+//   - attempts, error, lease, cancel_requested, started_at and completed_at
+//     go back to their values for a new run.
+//   - result, audio and source_path do not change. A pending or failed row
+//     has no result. The stored source file stays on disk, so the new
+//     attempt reads it. The retention sweep purges terminal rows only, and
+//     this row is pending after the call.
+//
+// The UPDATE also does three things that Requeue does not:
+//
+//   - next_attempt_at becomes now(). This drops the backoff of this row.
+//   - priority_at becomes now(). Claim takes the row with the newest
+//     priority_at first.
+//   - status becomes pending, also for a row that was pending already.
+//
+// Calling it again is safe. The row stays pending in a clean retry state,
+// and priority_at moves to the time of the newest call.
+//
+// It does not touch any other row. The backoff of one row is not shared
+// with another row, and a running row keeps its worker slot: the new
+// attempt starts when a slot is free.
+//
+// priority_at stays set while the row is pending or running. An automatic
+// retry keeps it, and max_attempts bounds those retries. Every terminal
+// transition clears it (see Finish, RequestCancel and ReleaseExpired).
+func (s *Store) Prioritize(ctx context.Context, id string) (*domain.Transcription, error) {
+	row := s.pool.QueryRow(ctx, `
+		UPDATE transcriptions
+		SET status = 'pending',
+		    attempts = 0,
+		    error = NULL,
+		    lease_owner = NULL,
+		    lease_token = NULL,
+		    lease_expires_at = NULL,
+		    cancel_requested = false,
+		    next_attempt_at = now(),
+		    priority_at = now(),
+		    started_at = NULL,
+		    completed_at = NULL,
+		    updated_at = now()
+		WHERE id = $1 AND (status = 'failed' OR (status = 'pending' AND NOT cancel_requested))
+		RETURNING `+transcriptionColumns,
+		id,
+	)
+	t, err := scanTranscription(row)
+	if err == nil {
+		return t, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, mapErr(err)
+	}
+	return nil, s.notFoundOrConflict(ctx, id, "transcription %s is not pending or failed")
+}
+
 // notFoundOrConflict disambiguates a 0-rows-affected guarded UPDATE:
-// RequestCancel and Requeue both need to tell "no such transcription" apart
+// RequestCancel, Requeue and Prioritize all need to tell "no such transcription" apart
 // from "exists, but its status forbids this transition".
 func (s *Store) notFoundOrConflict(ctx context.Context, id string, conflictFormat string) error {
 	var exists bool

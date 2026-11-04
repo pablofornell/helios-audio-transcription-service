@@ -24,6 +24,8 @@ export interface QueueRowProps {
   now: number;
   onCancel: (id: string) => void;
   onRetry: (id: string) => void;
+  /** Shows the "Priority processing" button on eligible rows. Omitted: no button. */
+  onPrioritize?: (id: string) => void;
   onRemove: (transcription: Transcription) => void;
   onOpenLibrary?: (id?: string) => void;
 }
@@ -35,7 +37,7 @@ export interface QueueRowProps {
  * Handles both a `QueueRowModel` still uploading (no real id yet) and a
  * fully-known `Transcription`.
  */
-export function QueueRow({ model, canceling, entering, stale, now, onCancel, onRetry, onRemove, onOpenLibrary }: QueueRowProps) {
+export function QueueRow({ model, canceling, entering, stale, now, onCancel, onRetry, onPrioritize, onRemove, onOpenLibrary }: QueueRowProps) {
   const uid = useId();
   const titleId = `${uid}-title`;
   const statusId = `${uid}-status`;
@@ -121,7 +123,8 @@ export function QueueRow({ model, canceling, entering, stale, now, onCancel, onR
       }
       meta={meta}
       statusSlot={
-        <span id={statusId}>
+        <span id={statusId} className={styles.statusGroup}>
+          {hasPriority(transcription) ? <PriorityBadge /> : null}
           <StatusPill status={status} errorCode={transcription.error?.code} />
         </span>
       }
@@ -131,7 +134,7 @@ export function QueueRow({ model, canceling, entering, stale, now, onCancel, onR
         </span>
       }
       primaryAction={
-        <PrimaryAction transcription={transcription} status={status} onCancel={onCancel} onRetry={onRetry} />
+        <PrimaryAction transcription={transcription} status={status} onCancel={onCancel} onRetry={onRetry} onPrioritize={onPrioritize} />
       }
       secondaryActions={
         <RowMenu transcription={transcription} status={status} onRetry={onRetry} onRemove={onRemove} onOpenLibrary={onOpenLibrary} ctxMenu={ctxMenu} />
@@ -150,6 +153,21 @@ function AudioGlyph() {
   );
 }
 
+/** True while the user's priority request is active: set, and the row has not left the queue. */
+function hasPriority(transcription: Transcription): boolean {
+  return Boolean(transcription.priorityAt) && (transcription.status === "pending" || transcription.status === "running");
+}
+
+/** The "this row goes first" marker. The glyph and the label always show together. */
+function PriorityBadge() {
+  return (
+    <span className={styles.priorityBadge}>
+      <PriorityGlyph className={styles.priorityGlyph} />
+      <span>Priority</span>
+    </span>
+  );
+}
+
 function renderMeta(transcription: Transcription, status: DisplayStatus, stale: boolean, now: number): ReactNode {
   if (stale && (status === "pending" || status === "running")) {
     const seconds = secondsSince(transcription.updatedAt, new Date(now));
@@ -162,6 +180,14 @@ function renderMeta(transcription: Transcription, status: DisplayStatus, stale: 
         Retry {transcription.attempts} of {transcription.maxAttempts}
       </span>
     );
+  }
+
+  // This service has no cooldown that spans several rows, and no rate limit
+  // from an outside service. A priority row that is not running waits for
+  // one thing only: a free worker slot. Say so, or the row shows nothing
+  // about why it is not running.
+  if (status === "pending" && hasPriority(transcription)) {
+    return <span className={styles.meta}>Waiting for the next slot</span>;
   }
 
   if (status === "failed") {
@@ -226,13 +252,37 @@ interface PrimaryActionProps {
   status: DisplayStatus;
   onCancel: (id: string) => void;
   onRetry: (id: string) => void;
+  onPrioritize?: (id: string) => void;
 }
 
 function stopDoubleClick(e: MouseEvent<HTMLButtonElement>) {
   e.stopPropagation();
 }
 
-function PrimaryAction({ transcription, status, onCancel, onRetry }: PrimaryActionProps) {
+/** Pending rows and failed rows with a Retry control can go first. The server rejects running, succeeded and canceled rows. */
+function canPrioritize(transcription: Transcription, status: DisplayStatus): boolean {
+  if (status === "pending") return true;
+  return status === "failed" && errorCopyFor(transcription.error?.code).canRetry;
+}
+
+function PrimaryAction(props: PrimaryActionProps) {
+  const { transcription, status, onPrioritize } = props;
+  const action = <StatusAction {...props} />;
+  if (!onPrioritize || !canPrioritize(transcription, status)) return action;
+  return (
+    <>
+      <IconButton
+        icon={<PriorityGlyph />}
+        label="Priority processing"
+        onClick={() => onPrioritize(transcription.id)}
+        onDoubleClick={stopDoubleClick}
+      />
+      {action}
+    </>
+  );
+}
+
+function StatusAction({ transcription, status, onCancel, onRetry }: PrimaryActionProps) {
   if (status === "pending" || status === "running") {
     return <IconButton icon={<CancelGlyph />} label="Cancel" onClick={() => onCancel(transcription.id)} onDoubleClick={stopDoubleClick} />;
   }
@@ -276,6 +326,14 @@ function RowMenu({ transcription, status, onRetry, onRemove, onOpenLibrary, ctxM
       <Menu items={items} open={open} onClose={() => setOpen(false)} anchorRef={triggerRef} returnFocusRef={triggerRef} />
       <Menu items={items} open={ctxMenu.open} position={ctxMenu.position} onClose={ctxMenu.close} returnFocusRef={triggerRef} />
     </>
+  );
+}
+
+function PriorityGlyph({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <path d="M3.4 7.6L7 4l3.6 3.6M3.4 11L7 7.4 10.6 11" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 

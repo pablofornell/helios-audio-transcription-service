@@ -317,6 +317,18 @@ describe("transcriptionStore — reach beyond one page", () => {
     unsubscribe();
   });
 
+  it("loads a pending priority row that is older than the newest page, with its priorityAt", async () => {
+    const rows = manyRows(250, () => "succeeded");
+    rows[240] = { ...rows[240], status: "pending", priorityAt: "2024-01-02T00:00:00Z" };
+    fakeServer(rows);
+    const { transcriptionStore, unsubscribe, ids } = await started();
+    expect(ids()).toContain("t-240");
+    const row = transcriptionStore.getSnapshot().transcriptions.find((t) => t.id === "t-240");
+    expect(row?.priorityAt).toBe("2024-01-02T00:00:00Z");
+    expect(transcriptionStore.getSnapshot().hasMore).toBe(true);
+    unsubscribe();
+  });
+
   it("walks every loaded page on each poll, so a new row pushes the oldest loaded row off the cache", async () => {
     const server = fakeServer(manyRows(150, () => "succeeded"));
     const { transcriptionStore, unsubscribe, ids } = await started();
@@ -441,6 +453,24 @@ describe("transcriptionStore — reach beyond one page", () => {
     open();
     await vi.advanceTimersByTimeAsync(0);
     expect(ids()).toEqual(["t-0", "t-2"]);
+    unsubscribe();
+  });
+
+  it("upsert() shows the returned row at once and no earlier walk overwrites it", async () => {
+    const server = fakeServer(manyRows(2, () => "pending"));
+    const { transcriptionStore, unsubscribe } = await started();
+    const priorityAt = (id: string) => transcriptionStore.getSnapshot().transcriptions.find((t) => t.id === id)?.priorityAt;
+    let open!: () => void;
+    server.gate = new Promise<void>((resolve) => { open = resolve; });
+    transcriptionStore.refreshNow(); // a walk that still holds the old row
+    const updated = { ...server.rows[1], priorityAt: "2026-11-04T10:00:00Z" };
+    transcriptionStore.upsert(updated);
+    expect(priorityAt("t-1")).toBe("2026-11-04T10:00:00Z");
+    server.rows = [server.rows[0], updated];
+    server.gate = undefined;
+    open();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(priorityAt("t-1")).toBe("2026-11-04T10:00:00Z");
     unsubscribe();
   });
 

@@ -22,6 +22,7 @@ type fakeAPI struct {
 	deleteFunc           func(ctx context.Context, id string) error
 	cancelFunc           func(ctx context.Context, id string) (*domain.Transcription, error)
 	retryFunc            func(ctx context.Context, id string) (*domain.Transcription, error)
+	prioritizeFunc       func(ctx context.Context, id string) (*domain.Transcription, error)
 	getTranscriptFunc    func(ctx context.Context, id string, format transcript.Format) ([]byte, error)
 	openAudioFunc        func(ctx context.Context, id string) (io.ReadSeekCloser, httpclient.AudioInfo, error)
 	healthFunc           func(ctx context.Context) (HealthReport, error)
@@ -76,6 +77,13 @@ func (f *fakeAPI) Retry(ctx context.Context, id string) (*domain.Transcription, 
 		panic("fakeAPI: Retry not configured")
 	}
 	return f.retryFunc(ctx, id)
+}
+
+func (f *fakeAPI) Prioritize(ctx context.Context, id string) (*domain.Transcription, error) {
+	if f.prioritizeFunc == nil {
+		panic("fakeAPI: Prioritize not configured")
+	}
+	return f.prioritizeFunc(ctx, id)
 }
 
 func (f *fakeAPI) GetTranscript(ctx context.Context, id string, format transcript.Format) ([]byte, error) {

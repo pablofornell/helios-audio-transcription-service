@@ -54,6 +54,11 @@ type Transcription struct {
 	// CompletedAt is when the job reached a terminal Status. Nil until
 	// then.
 	CompletedAt *time.Time `json:"completedAt,omitempty"`
+	// PriorityAt is when the user asked to process this job first
+	// (Repository.Prioritize). Nil means no priority. Queue.Claim takes jobs
+	// with a PriorityAt before all others, newest first. Every terminal
+	// transition clears it.
+	PriorityAt *time.Time `json:"priorityAt,omitempty"`
 	// NextAttemptAt is when this job becomes eligible to be claimed. Never
 	// exposed to API callers: it is a queue implementation detail.
 	NextAttemptAt *time.Time `json:"-"`

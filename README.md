@@ -169,6 +169,18 @@ and queues it, then a worker in the same process runs the actual pipeline. Poll
 `GET /transcriptions/{id}` (or build a client that does) until `status` reaches
 `succeeded`, `failed` or `canceled` — there is no webhook and no SSE stream.
 
+**Priority processing.** The **Priority processing** button on a queue item (`POST
+/api/v1/transcriptions/{id}/prioritize`) moves a pending item, or a failed item that
+has a Retry control, to the front of the queue. It resets the retry state of that item
+(attempts, error and its own retry delay). The item starts a new attempt as soon as a
+worker slot is free (`HELIOS_WORKER_CONCURRENCY`, default 2). A running item keeps its
+slot: priority does not stop it. The item shows a **Priority** badge, and the text
+"Waiting for the next slot" while it does not run. If you click on several items, the
+newest click goes first. This service has no rate limit from an outside service and no
+cooldown that several items share: `whisper-cli` runs on the same host. So the only
+waits of an item are its own retry delay and the free slots. The server ends the
+priority when the item succeeds, fails, is canceled, or uses its last attempt.
+
 **Model weights are provisioned separately.** Only `large-v3-turbo-q5_0` is
 supported for new submissions. Run `make models` to fetch
 `ggml-large-v3-turbo-q5_0.bin` and `ggml-large-v3-q5_0.bin`; see

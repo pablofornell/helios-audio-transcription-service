@@ -403,6 +403,26 @@ like a dead one). Both endpoints are 409 (`error.code: "conflict"`) from any sta
 that doesn't permit the transition — a `cancel` on an already-terminal job, or a
 `retry` on anything but `failed`/`canceled`.
 
+## Process one job first
+
+```
+curl -X POST localhost:7462/api/v1/transcriptions/<id>/prioritize   # pending or failed -> pending, first in the queue
+```
+
+`prioritize` is legal from `status: "pending"` or `"failed"` — 409 (`error.code:
+"conflict"`) from `running`, `succeeded` and `canceled`, and from a `pending` job that
+has a cancel request. It resets `attempts`, the error and the retry delay of that job,
+and sets `priorityAt`. The worker claims jobs with a `priorityAt` before all others,
+newest first, so the job starts as soon as one of the `HELIOS_WORKER_CONCURRENCY`
+slots is free. It does not stop a running job. Calling it again is safe.
+
+Priority ends when the job succeeds, fails or is canceled, and when a lease expiry
+leaves the job no attempt. A job that fails with a retryable error keeps its priority
+for its next attempt, but only until `max_attempts`. A job that waits for its retry
+delay is not due, so other jobs run in the meantime. To check the claim order, run
+`EXPLAIN` on the `Claim` query: it must use `transcriptions_pending_priority_claim_idx`
+and must not have a `Sort` node.
+
 ## Backup and restore
 
 **Both the database and the storage volume are needed together — one without the other

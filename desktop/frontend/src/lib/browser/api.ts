@@ -137,6 +137,11 @@ export function retry(id: string): Promise<Transcription> {
   return requestJSON<Transcription>(apiPath(`/transcriptions/${id}/retry`), { method: "POST" }, [200]);
 }
 
+/** Puts a pending or failed transcription first in the queue and resets its retry state. See `app.App.Prioritize` / `POST /api/v1/transcriptions/{id}/prioritize`. */
+export function prioritize(id: string): Promise<Transcription> {
+  return requestJSON<Transcription>(apiPath(`/transcriptions/${id}/prioritize`), { method: "POST" }, [202]);
+}
+
 /** Requests that a pending or running transcription stop. See `app.App.Cancel` / `POST /api/v1/transcriptions/{id}/cancel`. */
 export async function cancel(id: string): Promise<void> {
   await requestJSON<void>(apiPath(`/transcriptions/${id}/cancel`), { method: "POST" }, [200]);

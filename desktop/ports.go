@@ -26,6 +26,7 @@ type transcriptionAPI interface {
 	Delete(ctx context.Context, id string) error
 	Cancel(ctx context.Context, id string) (*domain.Transcription, error)
 	Retry(ctx context.Context, id string) (*domain.Transcription, error)
+	Prioritize(ctx context.Context, id string) (*domain.Transcription, error)
 	// GetTranscript returns the rendered transcript body for id in format
 	// -- see internal/transcript.Format's own doc for the four accepted
 	// values.

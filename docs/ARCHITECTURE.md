@@ -25,13 +25,24 @@ same `transcriptions` table `app.Repository` reads is the queue, claimed with
 WITH candidate AS (
     SELECT id FROM transcriptions
     WHERE status = 'pending' AND next_attempt_at <= now()
-    ORDER BY next_attempt_at, created_at
+    ORDER BY priority_at DESC NULLS LAST, next_attempt_at, created_at, id
     FOR UPDATE SKIP LOCKED
     LIMIT 1
 )
 UPDATE transcriptions SET status = 'running', ... FROM candidate ...
 RETURNING ...
 ```
+
+`priority_at` is set by the "Priority processing" button (`POST
+.../prioritize`). A row with a `priority_at` goes first, and the newest click goes
+first among those rows. Every other row keeps the first-in, first-out order. The
+partial index `transcriptions_pending_priority_claim_idx` has the same column order as
+the `ORDER BY`, so `LIMIT 1` stops at the first row that passes the filters and the
+query never sorts the backlog. Every terminal transition (`Finish` to a terminal
+status, `RequestCancel` on a pending row, and `ReleaseExpired` when no attempt is left)
+clears `priority_at`. An automatic retry keeps it, but `max_attempts` bounds the
+retries, so a priority row cannot hold the head of the queue for ever. A priority row
+that waits for its own backoff is not due, so `Claim` skips it and takes the next row.
 
 `SKIP LOCKED` means a concurrent `Claim` — another worker in this process, or a worker
 in an entirely different process — simply never sees the row a winning `Claim` just
@@ -49,8 +60,9 @@ caller-facing mutation (cancel, retry, delete) must never be able to clobber the
 a worker currently holds, and a worker's lease-guarded write must never be reachable
 from an ordinary CRUD call that doesn't even know what a lease is.
 
-- **`Repository`** creates, reads, lists and deletes rows, plus the two caller-facing
-  state changes that are not lease-guarded writes: `RequestCancel` and `Requeue`.
+- **`Repository`** creates, reads, lists and deletes rows, plus the three caller-facing
+  state changes that are not lease-guarded writes: `RequestCancel`, `Requeue` and
+  `Prioritize`.
 - **`Queue`** is every legal worker-side transition and nothing else: `Claim`,
   `Heartbeat`, `Finish`, `ReleaseExpired`, `PurgeTerminalBefore`. Every write here
   applies only if the row's current state and lease ownership permit it, and writes

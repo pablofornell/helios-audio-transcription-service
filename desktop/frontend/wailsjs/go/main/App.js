@@ -50,6 +50,10 @@ export function OpenAudio(arg1) {
   return window['go']['main']['App']['OpenAudio'](arg1);
 }
 
+export function Prioritize(arg1) {
+  return window['go']['main']['App']['Prioritize'](arg1);
+}
+
 export function Retry(arg1) {
   return window['go']['main']['App']['Retry'](arg1);
 }

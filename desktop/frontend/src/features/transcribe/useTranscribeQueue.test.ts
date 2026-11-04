@@ -1,12 +1,12 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { bumpServerSettingsVersion, type Options, type Transcription } from "../../lib";
+import { HeliosError, bumpServerSettingsVersion, type Options, type Transcription } from "../../lib";
 import { useTranscribeQueue } from "./useTranscribeQueue";
-const mocks = vi.hoisted(() => ({ submit: vi.fn(), cancel: vi.fn(), retry: vi.fn(), refresh: vi.fn(), toast: vi.fn() }));
+const mocks = vi.hoisted(() => ({ submit: vi.fn(), cancel: vi.fn(), retry: vi.fn(), prioritize: vi.fn(), refresh: vi.fn(), upsert: vi.fn(), toast: vi.fn() }));
 const store = vi.hoisted(() => ({ transcriptions: [] as unknown[] }));
 vi.mock("../../lib", async (original) => ({
-  ...(await original<typeof import("../../lib")>()), submit: mocks.submit, cancel: mocks.cancel, retry: mocks.retry,
-  useTranscriptions: () => ({ transcriptions: store.transcriptions, loading: false }), transcriptionStore: { refreshNow: mocks.refresh },
+  ...(await original<typeof import("../../lib")>()), submit: mocks.submit, cancel: mocks.cancel, retry: mocks.retry, prioritize: mocks.prioritize,
+  useTranscriptions: () => ({ transcriptions: store.transcriptions, loading: false }), transcriptionStore: { refreshNow: mocks.refresh, upsert: mocks.upsert },
 }));
 vi.mock("../../components", () => ({ useToast: () => ({ show: mocks.toast }) }));
 const options: Options = { model: "", language: "", task: "transcribe", wordTimestamps: false, initialPrompt: "", beamSize: 5, temperature: 0 };
@@ -87,6 +87,51 @@ describe("queue lifecycle", () => {
     act(() => result.current.retry("same-id"));
     expect(mocks.retry).toHaveBeenCalledTimes(2);
   });
+});
+
+describe("priority processing", () => {
+  it("calls the API and shows the returned row at once", async () => {
+    const prioritized = { id: "same-id", status: "pending", priorityAt: "2026-11-04T10:00:00Z" } as Transcription;
+    mocks.prioritize.mockResolvedValue(prioritized);
+    const { result } = renderHook(useTranscribeQueue);
+    await act(async () => { result.current.prioritize("same-id"); await vi.advanceTimersByTimeAsync(0); });
+    expect(mocks.prioritize).toHaveBeenCalledWith("same-id");
+    expect(mocks.upsert).toHaveBeenCalledWith(prioritized);
+    expect(mocks.toast).not.toHaveBeenCalled();
+  });
+  it("shows an error toast and refreshes when the server refuses", async () => {
+    mocks.prioritize.mockRejectedValue(new HeliosError("conflict", "transcription is not pending or failed"));
+    const { result } = renderHook(useTranscribeQueue);
+    await act(async () => { result.current.prioritize("same-id"); await vi.advanceTimersByTimeAsync(0); });
+    expect(mocks.toast).toHaveBeenCalledWith({ message: "Couldn't prioritize — transcription is not pending or failed" });
+    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
+  it("deduplicates rapid requests, and allows a new one when the first is done", async () => {
+    mocks.prioritize.mockResolvedValue({ id: "same-id" } as Transcription);
+    const { result } = renderHook(useTranscribeQueue);
+    await act(async () => { result.current.prioritize("same-id"); result.current.prioritize("same-id"); await vi.advanceTimersByTimeAsync(0); });
+    expect(mocks.prioritize).toHaveBeenCalledTimes(1);
+    await act(async () => { result.current.prioritize("same-id"); await vi.advanceTimersByTimeAsync(0); });
+    expect(mocks.prioritize).toHaveBeenCalledTimes(2);
+  });
+  for (const succeeds of [true, false]) {
+    it(`ignores a late ${succeeds ? "success" : "failure"} after a server change`, async () => {
+      const request = deferred<Transcription>();
+      mocks.prioritize.mockReturnValue(request.promise);
+      const { result } = renderHook(useTranscribeQueue);
+      act(() => { result.current.prioritize("same-id"); });
+      act(() => bumpServerSettingsVersion());
+      await act(async () => {
+        if (succeeds) request.resolve({ id: "same-id" } as Transcription);
+        else request.reject(new Error("old server failure"));
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(mocks.upsert).not.toHaveBeenCalled();
+      expect(mocks.refresh).not.toHaveBeenCalled();
+      expect(mocks.toast).not.toHaveBeenCalled();
+    });
+  }
 });
 
 describe("clear completed", () => {

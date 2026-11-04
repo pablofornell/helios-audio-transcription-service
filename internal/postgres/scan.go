@@ -17,7 +17,7 @@ import (
 const transcriptionColumns = `
 	id::text, status, options, audio, source_path, result, error,
 	attempts, max_attempts, lease_owner, lease_token::text, lease_expires_at, next_attempt_at,
-	created_at, updated_at, started_at, completed_at`
+	created_at, updated_at, started_at, completed_at, priority_at`
 
 // claimReturningColumns is transcriptionColumns qualified with the "t."
 // alias Store.Claim's UPDATE ... FROM candidate ... RETURNING clause needs:
@@ -27,7 +27,7 @@ const transcriptionColumns = `
 const claimReturningColumns = `
 	t.id::text, t.status, t.options, t.audio, t.source_path, t.result, t.error,
 	t.attempts, t.max_attempts, t.lease_owner, t.lease_token::text, t.lease_expires_at, t.next_attempt_at,
-	t.created_at, t.updated_at, t.started_at, t.completed_at`
+	t.created_at, t.updated_at, t.started_at, t.completed_at, t.priority_at`
 
 // scanTranscription scans one row shaped like transcriptionColumns (or
 // claimReturningColumns -- the same columns in the same order) into a fresh
@@ -40,7 +40,7 @@ func scanTranscription(row pgx.Row) (*domain.Transcription, error) {
 	err := row.Scan(
 		&t.ID, &t.Status, &t.Options, &t.Audio, &t.SourcePath, &t.Result, &t.Error,
 		&t.Attempts, &t.MaxAttempts, &t.LeaseOwner, &t.LeaseToken, &t.LeaseExpiresAt, &t.NextAttemptAt,
-		&t.CreatedAt, &t.UpdatedAt, &t.StartedAt, &t.CompletedAt,
+		&t.CreatedAt, &t.UpdatedAt, &t.StartedAt, &t.CompletedAt, &t.PriorityAt,
 	)
 	if err != nil {
 		return nil, err

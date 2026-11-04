@@ -140,6 +140,13 @@ class TranscriptionStore {
     }
   };
 
+  /** Puts a row the server just returned into the cache and publishes it at once, then refreshes so no walk that was in flight overwrites it with an older row. */
+  upsert = (t: Transcription): void => {
+    this.byId.set(t.id, t);
+    this.publish({});
+    this.refreshNow();
+  };
+
   /** Removes a row from the cache right away, for a row the user just deleted, then refreshes so no walk that was in flight brings it back. */
   forget = (id: string): void => {
     if (this.byId.delete(id)) this.publish({});

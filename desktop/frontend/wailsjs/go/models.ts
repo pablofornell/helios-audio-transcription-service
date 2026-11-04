@@ -247,6 +247,8 @@ export namespace main {
 	    startedAt?: any;
 	    // Go type: time
 	    completedAt?: any;
+	    // Go type: time
+	    priorityAt?: any;
 	
 	    static createFrom(source: any = {}) {
 	        return new TranscriptionDTO(source);
@@ -266,6 +268,7 @@ export namespace main {
 	        this.updatedAt = this.convertValues(source["updatedAt"], null);
 	        this.startedAt = this.convertValues(source["startedAt"], null);
 	        this.completedAt = this.convertValues(source["completedAt"], null);
+	        this.priorityAt = this.convertValues(source["priorityAt"], null);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

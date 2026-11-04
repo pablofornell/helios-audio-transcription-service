@@ -30,13 +30,20 @@ func microsecondsOf(d time.Duration) float64 {
 // picks up whatever is left on its next tick instead.
 const purgeBatchLimit = 1000
 
-// Claim atomically selects the single oldest due pending transcription and
-// moves it to running: the WITH candidate AS (... FOR UPDATE SKIP LOCKED)
+// Claim atomically selects the first due pending transcription and moves it
+// to running: the WITH candidate AS (... FOR UPDATE SKIP LOCKED)
 // picks the row under a row lock that a concurrent Claim will skip, and the
 // UPDATE ... RETURNING commits status/attempts/lease/started_at in the same
 // round trip -- so no two callers can ever be handed the same row. This is
 // the single most important correctness property in this package; see
 // TestStore_Claim_ConcurrentClaimersNeverOverlap.
+//
+// Claim order: rows with priority_at set come first, newest first
+// (priority_at DESC NULLS LAST, see Prioritize). Then the normal order:
+// next_attempt_at, created_at, id. The ORDER BY matches the partial index
+// transcriptions_pending_priority_claim_idx (migration 00003), so LIMIT 1
+// stops at the first row that passes the filters. Without that index the
+// query sorts every due pending row on each claim.
 //
 // candidate's own WHERE clause repeats `status = 'pending' AND
 // next_attempt_at <= now() AND NOT cancel_requested` directly rather than
@@ -66,7 +73,7 @@ func (s *Store) Claim(ctx context.Context, owner string, lease time.Duration) (*
 		WITH candidate AS (
 			SELECT id FROM transcriptions
 			WHERE status = 'pending' AND next_attempt_at <= now() AND NOT cancel_requested
-			ORDER BY next_attempt_at, created_at
+			ORDER BY priority_at DESC NULLS LAST, next_attempt_at, created_at, id
 			FOR UPDATE SKIP LOCKED
 			LIMIT 1
 		)
@@ -136,8 +143,8 @@ func (s *Store) Heartbeat(ctx context.Context, id, leaseToken string, lease time
 // token -- can never write a terminal state (or a retry) over whatever
 // holds the row now, and zero rows affected is ErrCodeConflict.
 //
-// req.Status.Terminal() (succeeded, failed or canceled) sets completed_at
-// and clears the lease outright. The status actually written is not always
+// req.Status.Terminal() (succeeded, failed or canceled) sets completed_at,
+// clears priority_at and clears the lease outright. The status actually written is not always
 // req.Status, though: if cancel_requested was set on this row (an API
 // caller canceled it after the worker's last heartbeat but before this
 // Finish call), a reported "succeeded" is downgraded to "canceled" --
@@ -150,7 +157,9 @@ func (s *Store) Heartbeat(ctx context.Context, id, leaseToken string, lease time
 // is not completed, even if a previous attempt's failure left a stale
 // completed_at behind -- see CONTRACT.md's retry-visibility fix) and
 // likewise clears the lease so the row becomes claimable again once it is
-// due. started_at is deliberately left untouched here: the job did start,
+// due. priority_at is left untouched here: a retry keeps the priority the
+// user asked for, and max_attempts bounds how often that can happen.
+// started_at is deliberately left untouched here: the job did start,
 // just not successfully yet. Any other req.Status is rejected as invalid
 // input -- Running is not a legal outcome, and neither is an unrecognised
 // value.
@@ -199,6 +208,7 @@ func (s *Store) Finish(ctx context.Context, req domain.FinishRequest) error {
 			    lease_token = NULL,
 			    lease_expires_at = NULL,
 			    completed_at = now(),
+			    priority_at = NULL,
 			    updated_at = now()
 			WHERE id = $1 AND lease_token = $2::uuid AND status = 'running'`,
 			req.ID, req.LeaseToken, string(req.Status), req.Result, req.Err, req.Audio, cancelDowngradeErr,
@@ -257,6 +267,10 @@ func (s *Store) Finish(ctx context.Context, req domain.FinishRequest) error {
 // marking the job failed. Recovering the row and failing it are the same
 // operation, decided per row.
 //
+// priority_at follows the same decision as completed_at. A row that moves to
+// a terminal status (canceled or failed) loses its priority. A row that
+// returns to pending keeps it, because it still has attempts left.
+//
 // It reports how many rows it recovered in total, counting the lease
 // recoveries and the cancellation reaps together: both are "rows this sweep
 // moved out of a state a worker can no longer act on", which is what the
@@ -279,6 +293,7 @@ func (s *Store) ReleaseExpired(ctx context.Context) (int, error) {
 		    END,
 		    error = CASE WHEN status = 'running' AND attempts >= max_attempts THEN $1::jsonb ELSE error END,
 		    completed_at = CASE WHEN status = 'pending' OR attempts >= max_attempts THEN now() ELSE completed_at END,
+		    priority_at = CASE WHEN status = 'pending' OR attempts >= max_attempts THEN NULL ELSE priority_at END,
 		    next_attempt_at = now(),
 		    lease_owner = NULL,
 		    lease_token = NULL,

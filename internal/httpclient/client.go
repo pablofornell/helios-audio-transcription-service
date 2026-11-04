@@ -32,8 +32,8 @@ import (
 const defaultUserAgent = "helios-ats-httpclient/1"
 
 // defaultRequestTimeout bounds every ordinary (non-streaming) call this
-// client makes -- Get, List, Delete, Cancel, Retry, GetTranscript, Healthz
-// and Readyz -- on top of whatever deadline ctx already carries. It does
+// client makes -- Get, List, Delete, Cancel, Retry, Prioritize, GetTranscript,
+// Healthz and Readyz -- on top of whatever deadline ctx already carries. It does
 // NOT apply to Submit (an upload's transfer time is unrelated to server
 // responsiveness, and is bounded by ctx alone -- see Submit's own doc) or
 // to OpenAudio's Range requests, for the same reason; see those methods'
