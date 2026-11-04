@@ -2,6 +2,7 @@ package fake
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,18 +80,40 @@ func TestTranscribe_wordsCoverEachSegmentSpanAndAreOrdered(t *testing.T) {
 	}
 }
 
-func TestTranscribe_taskHonoured(t *testing.T) {
-	tr := New(Config{})
-
-	transcribe, err := tr.Transcribe(context.Background(), newReq(domain.Options{Task: domain.TaskTranscribe}))
-	require.NoError(t, err)
-	assert.NotContains(t, transcribe.Text, "Translated:")
-	assert.Equal(t, domain.TaskTranscribe, transcribe.Task)
-
-	translate, err := tr.Transcribe(context.Background(), newReq(domain.Options{Task: domain.TaskTranslate}))
-	require.NoError(t, err)
-	assert.Contains(t, translate.Text, "Translated:")
-	assert.Equal(t, domain.TaskTranslate, translate.Task)
+// The language rule (domain.PlanOutput) sets the output from the detected
+// language. Options.Task and Options.Language do not: Spanish is never
+// translated, a third language always is.
+func TestTranscribe_outputFollowsLanguageRule(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		detected  string
+		opts      domain.Options
+		wantLang  string
+		wantOut   string
+		translate bool
+	}{
+		{"default is english", "", domain.Options{Task: domain.TaskTranscribe}, "en", "en", false},
+		{"spanish, task=translate", "es", domain.Options{Task: domain.TaskTranslate}, "es", "es", false},
+		{"english, task=translate", "en", domain.Options{Task: domain.TaskTranslate}, "en", "en", false},
+		{"french, task=transcribe", "fr", domain.Options{Task: domain.TaskTranscribe}, "fr", "en", true},
+		{"hint es on french audio", "fr", domain.Options{Language: "es"}, "fr", "en", true},
+		{"hint fr on spanish audio", "es", domain.Options{Language: "fr"}, "es", "es", false},
+		{"unknown hint xx on english audio", "en", domain.Options{Language: "xx"}, "en", "en", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := New(Config{DetectedLanguage: tt.detected})
+			got, err := tr.Transcribe(context.Background(), newReq(tt.opts))
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantLang, got.Language)
+			assert.Equal(t, tt.wantOut, got.OutputLanguage)
+			assert.Equal(t, tt.translate, strings.Contains(got.Text, "Translated:"))
+			if tt.translate {
+				assert.Equal(t, domain.TaskTranslate, got.Task)
+			} else {
+				assert.Equal(t, domain.TaskTranscribe, got.Task)
+			}
+		})
+	}
 }
 
 func TestTranscribe_modelEchoedFromRequest(t *testing.T) {
@@ -100,7 +123,7 @@ func TestTranscribe_modelEchoedFromRequest(t *testing.T) {
 	assert.Equal(t, "large-v3-turbo-q5_0", got.Model)
 }
 
-func TestTranscribe_languageDefaultsToEnglishWhenAutoDetect(t *testing.T) {
+func TestTranscribe_detectedLanguageDefaultsToEnglishAndIgnoresHint(t *testing.T) {
 	tr := New(Config{})
 	got, err := tr.Transcribe(context.Background(), newReq(domain.Options{Language: ""}))
 	require.NoError(t, err)
@@ -108,7 +131,7 @@ func TestTranscribe_languageDefaultsToEnglishWhenAutoDetect(t *testing.T) {
 
 	got2, err := tr.Transcribe(context.Background(), newReq(domain.Options{Language: "es"}))
 	require.NoError(t, err)
-	assert.Equal(t, "es", got2.Language)
+	assert.Equal(t, "en", got2.Language, "a hint does not change the detected language")
 }
 
 func TestTranscribe_forcedFailure(t *testing.T) {

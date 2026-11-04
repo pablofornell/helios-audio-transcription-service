@@ -17,6 +17,9 @@ import (
 // through Wails' AST scanner.
 
 // OptionsDTO mirrors httpapi's optionsDTO / domain.Options field for field.
+// Language is only a hint for the audio language. Task is accepted for
+// compatibility and ignored: the service sets the output language itself
+// (see domain.PlanOutput).
 type OptionsDTO struct {
 	Model          string      `json:"model"`
 	Language       string      `json:"language"`
@@ -99,6 +102,7 @@ type SegmentDTO struct {
 type ResultDTO struct {
 	Text            string       `json:"text"`
 	Language        string       `json:"language"`
+	OutputLanguage  string       `json:"outputLanguage,omitempty"`
 	DurationSeconds float64      `json:"durationSeconds"`
 	Model           string       `json:"model"`
 	Task            domain.Task  `json:"task"`
@@ -127,6 +131,7 @@ func resultFromDomain(r *domain.Result) *ResultDTO {
 	return &ResultDTO{
 		Text:            r.Text,
 		Language:        r.Language,
+		OutputLanguage:  r.OutputLanguage,
 		DurationSeconds: r.DurationSeconds,
 		Model:           r.Model,
 		Task:            r.Task,

@@ -4,6 +4,7 @@ import {
   displayStatus as computeDisplayStatus,
   formatBytes,
   formatDuration,
+  formatLanguages,
   formatTimestamp,
   secondsSince,
   type DisplayStatus,
@@ -171,9 +172,8 @@ function renderMeta(transcription: Transcription, status: DisplayStatus, stale: 
   }
 
   const segments: string[] = [];
-  segments.push(transcription.options.task === "translate" ? "translate" : "transcribe");
-  segments.push(transcription.options.model || "default model");
-  segments.push(transcription.options.language || "auto-detect");
+  segments.push(transcription.result?.model || transcription.options.model || "default model");
+  segments.push(formatLanguages(transcription));
   if (transcription.audio.durationSeconds > 0) segments.push(formatDuration(transcription.audio.durationSeconds));
   else if (transcription.audio.sizeBytes > 0) segments.push(formatBytes(transcription.audio.sizeBytes));
 
@@ -239,7 +239,7 @@ function PrimaryAction({ transcription, status, onCancel, onRetry }: PrimaryActi
   if (status === "canceling") {
     return <IconButton icon={<CancelGlyph />} label="Canceling…" disabled onDoubleClick={stopDoubleClick} />;
   }
-  if (status === "failed" && errorCopyFor(transcription.error?.code).retryable) {
+  if (status === "failed" && errorCopyFor(transcription.error?.code).canRetry) {
     return <IconButton icon={<RetryGlyph />} label="Retry" onClick={() => onRetry(transcription.id)} onDoubleClick={stopDoubleClick} />;
   }
   return null;
@@ -262,7 +262,7 @@ function RowMenu({ transcription, status, onRetry, onRemove, onOpenLibrary, ctxM
   if (onOpenLibrary) {
     items.push({ id: "library", label: "View in Library", onSelect: () => onOpenLibrary(transcription.id) });
   }
-  if (status === "failed" && errorCopyFor(transcription.error?.code).retryable) {
+  if (status === "failed" && errorCopyFor(transcription.error?.code).canRetry) {
     items.push({ id: "retry", label: "Retry", onSelect: () => onRetry(transcription.id) });
   }
   if (isTerminalStatus(transcription.status)) {

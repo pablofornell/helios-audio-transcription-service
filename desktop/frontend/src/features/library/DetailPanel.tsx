@@ -5,6 +5,7 @@ import {
   formatAbsolute,
   formatBytes,
   formatDuration,
+  formatLanguages,
   formatRelative,
   formatTimestamp,
   getServerSettings,
@@ -249,11 +250,9 @@ export function DetailPanel({ transcription, onClose, onRetry, onSaveAs, onDelet
             {title}
           </h2>
           <p className={styles.subtitle}>
-            {transcription.options.task === "translate" ? "Translate to English" : "Transcribe"}
+            {transcription.result?.model || transcription.options.model || "default model"}
             {" · "}
-            {transcription.options.model || "default model"}
-            {" · "}
-            {transcription.options.language || "auto-detect"}
+            {formatLanguages(transcription)}
           </p>
 
           {errorCopy ? (
@@ -264,7 +263,7 @@ export function DetailPanel({ transcription, onClose, onRetry, onSaveAs, onDelet
                 {transcription.error?.message ? <p className={styles.reasonBody}>{transcription.error.message}</p> : null}
                 <span className={["num", styles.reasonCode].join(" ")}>{transcription.error?.code ?? "unknown"}</span>
                 <div className={styles.reasonActions}>
-                  {errorCopy.retryable ? (
+                  {errorCopy.canRetry ? (
                     <Button variant="neutral" size="sm" loading={retrying} onClick={handleRetry}>
                       Try again
                     </Button>

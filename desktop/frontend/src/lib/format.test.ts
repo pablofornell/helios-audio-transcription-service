@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration, formatTimestamp } from "./format";
+import type { Transcription } from "./types";
+import { formatDuration, formatLanguages, formatTimestamp, languageName } from "./format";
 
 /*
  * `formatTimestamp`/`formatDuration` are the two units the transcript
@@ -43,5 +44,42 @@ describe("formatDuration", () => {
   it("otherwise renders exactly like formatTimestamp", () => {
     expect(formatDuration(65)).toBe(formatTimestamp(65));
     expect(formatDuration(3_665)).toBe(formatTimestamp(3_665));
+  });
+});
+
+describe("formatLanguages", () => {
+  const result = (language: string, outputLanguage?: string, task: "transcribe" | "translate" = "transcribe"): Transcription["result"] =>
+    ({ text: "", language, outputLanguage, durationSeconds: 1, model: "m", task, segments: [] });
+
+  it("shows detected and output language for a translated job", () => {
+    expect(formatLanguages({ result: result("fr", "en", "translate") })).toBe("French → English");
+  });
+
+  it("shows one language when audio and transcript match", () => {
+    expect(formatLanguages({ result: result("es", "es") })).toBe("Spanish");
+    expect(formatLanguages({ result: result("en", "en") })).toBe("English");
+  });
+
+  it("shows only the detected language for an old transcribe result without outputLanguage", () => {
+    expect(formatLanguages({ result: result("en") })).toBe("English");
+    expect(formatLanguages({ result: result("es") })).toBe("Spanish");
+  });
+
+  it("shows the English output of an old translate result without outputLanguage", () => {
+    expect(formatLanguages({ result: result("fr", undefined, "translate") })).toBe("French → English");
+  });
+
+  it("shows no arrow for an old translate result whose audio was English", () => {
+    expect(formatLanguages({ result: result("en", undefined, "translate") })).toBe("English");
+  });
+
+  it("shows auto-detect while there is no result", () => {
+    expect(formatLanguages({ result: undefined })).toBe("auto-detect");
+  });
+});
+
+describe("languageName", () => {
+  it("falls back to the code for an unknown one", () => {
+    expect(languageName("zzzz-invalid-code!")).toBe("zzzz-invalid-code!");
   });
 });

@@ -60,7 +60,7 @@ migrate: ## Apply database migrations using HELIOS_DATABASE_DSN.
 	$(GO) run ./cmd/helios-transcription-api --migrate-only
 
 .PHONY: models
-models: ## Download whisper.cpp ggml model weights into ./models (default: large-v3-turbo-q5_0; only large-v3-turbo-q5_0 is supported).
+models: ## Download whisper.cpp ggml model weights into ./models (default: large-v3-turbo-q5_0 and large-v3-q5_0; MODEL=<name> fetches one).
 	./scripts/fetch-models.sh $(MODEL)
 
 .PHONY: docker-build

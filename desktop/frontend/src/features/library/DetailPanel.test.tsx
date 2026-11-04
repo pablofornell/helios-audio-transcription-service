@@ -130,7 +130,32 @@ it("keeps historical model names and completed transcripts accessible", async ()
   vi.mocked(transcript).mockResolvedValueOnce("Historical transcript");
   render(panel(legacy));
   expect(await screen.findByText("Historical transcript")).toBeInTheDocument();
-  expect(screen.getByText("Transcribe · base · auto-detect")).toBeInTheDocument();
+  expect(screen.getByText("base · English")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Save as…" })).toBeEnabled();
   expect(screen.getByRole("button", { name: "Download audio" })).toBeEnabled();
+});
+
+it("shows the detected and the output language, not the requested one", async () => {
+  const translated: Transcription = {
+    ...row, status: "succeeded", options: { ...row.options, language: "de" }, // the hint is ignored
+    result: { text: "Hello", language: "fr", outputLanguage: "en", model: "large-v3-q5_0", task: "translate", durationSeconds: 1, segments: [] },
+  };
+  vi.mocked(transcript).mockResolvedValueOnce("Hello");
+  render(panel(translated));
+  expect(await screen.findByText("large-v3-q5_0 · French → English")).toBeInTheDocument();
+  expect(screen.queryByText(/German/)).not.toBeInTheDocument();
+});
+
+it("offers Try again for a failed model_unavailable job and calls onRetry", async () => {
+  const onRetry = vi.fn();
+  const failed: Transcription = { ...row, status: "failed", error: { code: "model_unavailable", message: "Run `make models`, then retry the job." } };
+  render(<DetailPanel transcription={failed} onClose={() => {}} onRetry={onRetry} onSaveAs={() => {}} onDelete={() => {}} overlay={false} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+  expect(onRetry).toHaveBeenCalledWith("detail-source");
+});
+it("offers no Try again for a failed disk_full job", async () => {
+  const failed: Transcription = { ...row, status: "failed", error: { code: "disk_full", message: "full" } };
+  render(panel(failed));
+  await act(async () => {});
+  expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
 });

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,18 @@ const envPrefix = "HELIOS_"
 
 // SupportedModel is the only model supported for new transcription requests.
 const SupportedModel = "large-v3-turbo-q5_0"
+
+// DefaultTranslationModel is the model the service uses to translate audio
+// in a third language (not Spanish, not English) to English. The quantized
+// turbo model cannot translate: it was not trained for that task. This is
+// an internal choice of the service, not a value a caller can pick, so it
+// stays outside the AllowedModels list.
+const DefaultTranslationModel = "large-v3-q5_0"
+
+// translationModelPattern keeps TranscriberConfig.TranslationModel a safe
+// file-name part: the service builds ggml-<model>.bin from it. It matches
+// the shape domain.Options.Validate asks of a model name.
+var translationModelPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
 // giB is one gibibyte, used to spell out a couple of the byte-count
 // defaults below without a long string of digits.
@@ -87,6 +100,13 @@ type TranscriberConfig struct {
 	// AllowedModels is the set Options.Model must belong to. Parsed from a
 	// comma-separated list; only SupportedModel is supported.
 	AllowedModels []string
+	// TranslationModel is the model that translates third-language audio to
+	// English. It is a fixed internal choice, not a request option. Load
+	// fills DefaultTranslationModel. The
+	// service does not need its weight file to start or to be ready: only a
+	// job with third-language audio needs it, and that job fails with
+	// model_unavailable when the file is missing.
+	TranslationModel string
 	// Threads is the -t value passed to whisper-cli.
 	Threads int
 	// NoGPU disables GPU acceleration and forces CPU transcription.
@@ -247,15 +267,16 @@ func Load() (*Config, error) {
 			MinFreeBytes: l.getInt64("STORAGE_MIN_FREE_BYTES", giB),
 		},
 		Transcriber: TranscriberConfig{
-			Kind:          l.getString("TRANSCRIBER_KIND", "whispercpp"),
-			Binary:        l.getString("TRANSCRIBER_BINARY", "whisper-cli"),
-			ModelDir:      l.getString("TRANSCRIBER_MODEL_DIR", "/models"),
-			DefaultModel:  l.getString("TRANSCRIBER_DEFAULT_MODEL", SupportedModel),
-			AllowedModels: l.getStringSlice("TRANSCRIBER_ALLOWED_MODELS", []string{SupportedModel}),
-			Threads:       l.getInt("TRANSCRIBER_THREADS", 4),
-			NoGPU:         l.getBool("TRANSCRIBER_NO_GPU", false),
-			GPUDevice:     l.getInt("TRANSCRIBER_GPU_DEVICE", 0),
-			Timeout:       l.getDuration("TRANSCRIBER_TIMEOUT", 30*time.Minute),
+			Kind:             l.getString("TRANSCRIBER_KIND", "whispercpp"),
+			Binary:           l.getString("TRANSCRIBER_BINARY", "whisper-cli"),
+			ModelDir:         l.getString("TRANSCRIBER_MODEL_DIR", "/models"),
+			DefaultModel:     l.getString("TRANSCRIBER_DEFAULT_MODEL", SupportedModel),
+			AllowedModels:    l.getStringSlice("TRANSCRIBER_ALLOWED_MODELS", []string{SupportedModel}),
+			TranslationModel: l.getString("TRANSCRIBER_TRANSLATION_MODEL", DefaultTranslationModel),
+			Threads:          l.getInt("TRANSCRIBER_THREADS", 4),
+			NoGPU:            l.getBool("TRANSCRIBER_NO_GPU", false),
+			GPUDevice:        l.getInt("TRANSCRIBER_GPU_DEVICE", 0),
+			Timeout:          l.getDuration("TRANSCRIBER_TIMEOUT", 30*time.Minute),
 		},
 		Audio: AudioConfig{
 			FFmpegBinary:  l.getString("AUDIO_FFMPEG_BINARY", "ffmpeg"),
@@ -409,6 +430,20 @@ func (c *Config) Validate() error {
 	if !contains(c.Transcriber.AllowedModels, c.Transcriber.DefaultModel) {
 		return fmt.Errorf("config: transcriber default model %q must be one of the allowed models %v",
 			c.Transcriber.DefaultModel, c.Transcriber.AllowedModels)
+	}
+	// Empty is allowed: a Config built by hand (not by Load) then gets the
+	// transcriber's own default.
+	if c.Transcriber.TranslationModel != "" {
+		if !translationModelPattern.MatchString(c.Transcriber.TranslationModel) {
+			return fmt.Errorf("config: transcriber translation model %q must be a model name (lowercase letters, digits, '.', '_' or '-')",
+				c.Transcriber.TranslationModel)
+		}
+		// A turbo model returns the original language under -tr, so it can
+		// not translate. Refuse it here, not at the first third-language job.
+		if strings.Contains(c.Transcriber.TranslationModel, "turbo") {
+			return fmt.Errorf("config: transcriber translation model %q is a turbo model; turbo models cannot translate, use a non-turbo model such as %q",
+				c.Transcriber.TranslationModel, DefaultTranslationModel)
+		}
 	}
 	if c.Audio.Timeout+c.Transcriber.Timeout >= c.Worker.JobTimeout {
 		return fmt.Errorf("config: audio timeout (%s) + transcriber timeout (%s) must be less than worker job timeout (%s)",

@@ -42,11 +42,23 @@ func (t *Transcriber) modelPath(model string) (string, error) {
 }
 
 // Transcribe implements app.Transcriber.Transcribe (see internal/app's
-// ports.go): it locates the requested model, runs whisper-cli in a
-// per-job temp directory created next to req.AudioPath (inside the store
-// root the caller's AudioPath already lives under — never /tmp directly,
-// per CONTRACT.md section 11's convention), and parses its JSON output
-// into a domain.Result.
+// ports.go). It runs in this order:
+//
+//  1. Detect the language spoken in the audio (see detectLanguage), using
+//     Options.Model. The request never sets it: Options.Language is
+//     ignored, because a wrong hint gave a wrong transcript (Spanish audio
+//     with a "fr" hint came out in English).
+//  2. Apply domain.PlanOutput. Spanish gives Spanish, English gives
+//     English, any other language gives English by translation. The
+//     request's Options.Task plays no part.
+//  3. Run whisper-cli in a per-job temp directory created next to
+//     req.AudioPath (inside the store root the caller's AudioPath already
+//     lives under — never /tmp directly, per CONTRACT.md section 11's
+//     convention), and parse its JSON output into a domain.Result. A
+//     translation uses Config.TranslationModel, with -tr. All other jobs
+//     use Options.Model, without -tr.
+//
+// Config.Timeout bounds steps 1 to 3 together. Detection time counts in it.
 func (t *Transcriber) Transcribe(ctx context.Context, req domain.TranscribeRequest) (*domain.Result, error) {
 	if req.Options.Model == "" {
 		// Options.Validate documents an empty Model as meaning "the
@@ -75,6 +87,24 @@ func (t *Transcriber) Transcribe(ctx context.Context, req domain.TranscribeReque
 			WithDetails("model", req.Options.Model)
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, t.cfg.Timeout)
+	defer cancel()
+
+	detected, err := t.detectLanguage(ctx, req, modelPath)
+	if err != nil {
+		return nil, err
+	}
+
+	plan := domain.PlanOutput(detected.Language)
+	runModel, runModelPath := req.Options.Model, modelPath
+	if plan.Translate {
+		runModel = t.cfg.TranslationModel
+		runModelPath, err = t.translationModelPath()
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	outDir, err := os.MkdirTemp(filepath.Dir(req.AudioPath), ".whisper-out-")
 	if err != nil {
 		return nil, domain.Wrap(domain.ErrCodeInternal, "whispercpp: create per-job temp dir", err)
@@ -82,7 +112,7 @@ func (t *Transcriber) Transcribe(ctx context.Context, req domain.TranscribeReque
 	defer func() { _ = os.RemoveAll(outDir) }()
 
 	outBase := filepath.Join(outDir, "transcript")
-	args := buildArgs(t.cfg, req, modelPath, outBase)
+	args := buildArgs(t.cfg, req, plan.SourceLanguage, plan.Translate, runModelPath, outBase)
 
 	res := t.run(ctx, args)
 	if res.Err != nil || res.ExitCode != 0 {
@@ -100,15 +130,30 @@ func (t *Transcriber) Transcribe(ctx context.Context, req domain.TranscribeReque
 		return nil, withStderrTail(domain.Wrap(domain.ErrCodeToolFailure, "whispercpp: parse whisper-cli output JSON", err), res)
 	}
 
-	result.Model = req.Options.Model
-	result.Task = req.Options.Task
-	if !req.Options.AutoDetectLanguage() && result.Language == "" {
-		// A forced language always echoes back as itself even if, for
-		// whatever reason, whisper-cli's own "result".language came back
-		// empty (e.g. an older build's JSON omitting it under -l other
-		// than auto) — Result.Language documents this as "the detected...
-		// or forced... code whisper-cli actually used".
-		result.Language = req.Options.Language
-	}
+	// The language we passed with -l is the language we know. It does not
+	// depend on what the JSON says.
+	result.Model = runModel
+	result.Language = plan.SourceLanguage
+	result.OutputLanguage = plan.OutputLanguage
+	result.Task = plan.Task()
 	return result, nil
+}
+
+// translationModelPath returns the path of Config.TranslationModel, or a
+// model_unavailable error when its weight file is not on disk. That code is
+// not retryable. The message names the model and the host action that fixes
+// it. The service must never fall back to the turbo model here: turbo would
+// return the original language, not English.
+func (t *Transcriber) translationModelPath() (string, error) {
+	path, err := t.modelPath(t.cfg.TranslationModel)
+	if err != nil {
+		return "", err
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		return "", domain.Wrap(domain.ErrCodeModelUnavailable,
+			fmt.Sprintf("whispercpp: translation model %q is not present on disk; this audio is not Spanish or English and needs it to produce English text; run `make models` on the host, then retry the job",
+				t.cfg.TranslationModel), statErr).
+			WithDetails("model", t.cfg.TranslationModel)
+	}
+	return path, nil
 }

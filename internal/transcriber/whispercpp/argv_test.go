@@ -27,7 +27,7 @@ func indexOf(args []string, s string) int {
 
 func TestBuildArgs_fixedFlags(t *testing.T) {
 	req := baseReq()
-	args := buildArgs(Config{Threads: 4}, req, "/models/ggml-large-v3-turbo-q5_0.bin", "/tmp/out/transcript")
+	args := buildArgs(Config{Threads: 4}, req, "en", false, "/models/ggml-large-v3-turbo-q5_0.bin", "/tmp/out/transcript")
 
 	assert.Equal(t, "/models/ggml-large-v3-turbo-q5_0.bin", args[indexOf(args, "-m")+1])
 	assert.Equal(t, req.AudioPath, args[indexOf(args, "-f")+1])
@@ -37,12 +37,10 @@ func TestBuildArgs_fixedFlags(t *testing.T) {
 	assert.Equal(t, "--no-prints", args[len(args)-1], "--no-prints must be last so nothing after it can be mistaken for its argument")
 }
 
-func TestBuildArgs_autoDetectLanguage(t *testing.T) {
-	req := baseReq()
-	req.Options.Language = ""
-	args := buildArgs(Config{Threads: 4}, req, "m", "o")
-	require.GreaterOrEqual(t, indexOf(args, "-l"), 0)
-	assert.Equal(t, "auto", args[indexOf(args, "-l")+1])
+func TestBuildArgs_languageIsAlwaysConcrete(t *testing.T) {
+	args := buildArgs(Config{Threads: 4}, baseReq(), "fr", true, "m", "o")
+	assert.Equal(t, "fr", args[indexOf(args, "-l")+1])
+	assert.NotContains(t, args, "auto")
 }
 
 func TestBuildArgs_GPUSelection(t *testing.T) {
@@ -56,7 +54,7 @@ func TestBuildArgs_GPUSelection(t *testing.T) {
 		{name: "CPU overrides device", cfg: Config{NoGPU: true, GPUDevice: 2}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			args := buildArgs(tt.cfg, baseReq(), "m", "o")
+			args := buildArgs(tt.cfg, baseReq(), "en", false, "m", "o")
 			if tt.cfg.NoGPU {
 				assert.Contains(t, args, "--no-gpu")
 				assert.NotContains(t, args, "--device")
@@ -71,31 +69,53 @@ func TestBuildArgs_GPUSelection(t *testing.T) {
 	}
 }
 
-func TestBuildArgs_forcedLanguage(t *testing.T) {
-	req := baseReq()
-	req.Options.Language = "es"
-	args := buildArgs(Config{Threads: 4}, req, "m", "o")
+func TestBuildArgs_translateFlagFollowsTranslateArgument(t *testing.T) {
+	args := buildArgs(Config{Threads: 4}, baseReq(), "fr", true, "m", "o")
+	assert.Contains(t, args, "-tr")
+	assert.Equal(t, "fr", args[indexOf(args, "-l")+1])
+}
+
+func TestBuildArgs_noTranslateFlagWhenNotTranslating(t *testing.T) {
+	args := buildArgs(Config{Threads: 4}, baseReq(), "es", false, "m", "o")
+	assert.NotContains(t, args, "-tr")
 	assert.Equal(t, "es", args[indexOf(args, "-l")+1])
 }
 
-func TestBuildArgs_translateFlag(t *testing.T) {
+// Options.Task must not reach whisper-cli: the translate argument, which
+// comes from domain.PlanOutput, is the only input to -tr.
+func TestBuildArgs_ignoresOptionsTask(t *testing.T) {
 	req := baseReq()
 	req.Options.Task = domain.TaskTranslate
-	args := buildArgs(Config{Threads: 4}, req, "m", "o")
-	assert.Contains(t, args, "-tr")
+	assert.NotContains(t, buildArgs(Config{Threads: 4}, req, "es", false, "m", "o"), "-tr")
+
+	req.Options.Task = domain.TaskTranscribe
+	assert.Contains(t, buildArgs(Config{Threads: 4}, req, "fr", true, "m", "o"), "-tr")
 }
 
-func TestBuildArgs_transcribeOmitsTranslateFlag(t *testing.T) {
-	req := baseReq()
-	req.Options.Task = domain.TaskTranscribe
-	args := buildArgs(Config{Threads: 4}, req, "m", "o")
+func TestBuildDetectArgs(t *testing.T) {
+	args := buildDetectArgs(Config{Threads: 6, GPUDevice: 1}, "/data/transcriptions/abc/audio.wav", "/models/ggml-x.bin")
+	assert.Equal(t, "/models/ggml-x.bin", args[indexOf(args, "-m")+1])
+	assert.Equal(t, "/data/transcriptions/abc/audio.wav", args[indexOf(args, "-f")+1], "detection must read the same audio as transcription")
+	assert.Equal(t, "6", args[indexOf(args, "-t")+1])
+	assert.Equal(t, "1", args[indexOf(args, "--device")+1])
+	assert.Contains(t, args, "-dl")
+	// --no-prints would hide the "auto-detected language" log line.
+	assert.NotContains(t, args, "--no-prints")
 	assert.NotContains(t, args, "-tr")
+	assert.NotContains(t, args, "-oj")
+	assert.NotContains(t, args, "-of")
+}
+
+func TestBuildDetectArgs_CPU(t *testing.T) {
+	args := buildDetectArgs(Config{NoGPU: true, GPUDevice: 3}, "a", "m")
+	assert.Contains(t, args, "--no-gpu")
+	assert.NotContains(t, args, "--device")
 }
 
 func TestBuildArgs_wordTimestampsSwitchesJSONFlag(t *testing.T) {
 	req := baseReq()
 	req.Options.WordTimestamps = true
-	args := buildArgs(Config{Threads: 4}, req, "m", "o")
+	args := buildArgs(Config{Threads: 4}, req, "en", false, "m", "o")
 	assert.Contains(t, args, "-ojf")
 	assert.NotContains(t, args, "-oj")
 }
@@ -103,7 +123,7 @@ func TestBuildArgs_wordTimestampsSwitchesJSONFlag(t *testing.T) {
 func TestBuildArgs_withoutWordTimestampsUsesPlainJSONFlag(t *testing.T) {
 	req := baseReq()
 	req.Options.WordTimestamps = false
-	args := buildArgs(Config{Threads: 4}, req, "m", "o")
+	args := buildArgs(Config{Threads: 4}, req, "en", false, "m", "o")
 	assert.Contains(t, args, "-oj")
 	assert.NotContains(t, args, "-ojf")
 }
@@ -111,7 +131,7 @@ func TestBuildArgs_withoutWordTimestampsUsesPlainJSONFlag(t *testing.T) {
 func TestBuildArgs_promptPresentWhenNonEmpty(t *testing.T) {
 	req := baseReq()
 	req.Options.InitialPrompt = "proper nouns: Xyzzy"
-	args := buildArgs(Config{Threads: 4}, req, "m", "o")
+	args := buildArgs(Config{Threads: 4}, req, "en", false, "m", "o")
 	require.GreaterOrEqual(t, indexOf(args, "--prompt"), 0)
 	assert.Equal(t, "proper nouns: Xyzzy", args[indexOf(args, "--prompt")+1])
 }
@@ -119,14 +139,14 @@ func TestBuildArgs_promptPresentWhenNonEmpty(t *testing.T) {
 func TestBuildArgs_promptAbsentWhenEmpty(t *testing.T) {
 	req := baseReq()
 	req.Options.InitialPrompt = ""
-	args := buildArgs(Config{Threads: 4}, req, "m", "o")
+	args := buildArgs(Config{Threads: 4}, req, "en", false, "m", "o")
 	assert.NotContains(t, args, "--prompt")
 }
 
 func TestBuildArgs_beamSizePresentWhenNonDefault(t *testing.T) {
 	req := baseReq()
 	req.Options.BeamSize = 8
-	args := buildArgs(Config{Threads: 4}, req, "m", "o")
+	args := buildArgs(Config{Threads: 4}, req, "en", false, "m", "o")
 	require.GreaterOrEqual(t, indexOf(args, "-bs"), 0)
 	assert.Equal(t, "8", args[indexOf(args, "-bs")+1])
 }
@@ -134,14 +154,14 @@ func TestBuildArgs_beamSizePresentWhenNonDefault(t *testing.T) {
 func TestBuildArgs_beamSizeAbsentWhenDefault(t *testing.T) {
 	req := baseReq()
 	req.Options.BeamSize = whisperDefaultBeamSize
-	args := buildArgs(Config{Threads: 4}, req, "m", "o")
+	args := buildArgs(Config{Threads: 4}, req, "en", false, "m", "o")
 	assert.NotContains(t, args, "-bs")
 }
 
 func TestBuildArgs_temperaturePresentWhenNonDefault(t *testing.T) {
 	req := baseReq()
 	req.Options.Temperature = 0.4
-	args := buildArgs(Config{Threads: 4}, req, "m", "o")
+	args := buildArgs(Config{Threads: 4}, req, "en", false, "m", "o")
 	require.GreaterOrEqual(t, indexOf(args, "-tp"), 0)
 	assert.Equal(t, "0.4", args[indexOf(args, "-tp")+1])
 }
@@ -149,6 +169,6 @@ func TestBuildArgs_temperaturePresentWhenNonDefault(t *testing.T) {
 func TestBuildArgs_temperatureAbsentWhenDefault(t *testing.T) {
 	req := baseReq()
 	req.Options.Temperature = whisperDefaultTemperature
-	args := buildArgs(Config{Threads: 4}, req, "m", "o")
+	args := buildArgs(Config{Threads: 4}, req, "en", false, "m", "o")
 	assert.NotContains(t, args, "-tp")
 }

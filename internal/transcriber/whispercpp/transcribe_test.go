@@ -50,12 +50,49 @@ func newAudioPath(t *testing.T) string {
 	return path
 }
 
+// detectFixture is the recorded real stderr of whisper-cli v1.9.4 run with
+// -dl on samples/jfk.wav and the tiny model (see testdata).
+const detectFixture = "testdata/detect_language_jfk_tiny.stderr"
+
+// detectPrefix returns the start of a stub script that must also survive
+// the detection run. On -dl it prints detectFixture with its language code
+// replaced by lang, then exits 0 without more work.
+func detectPrefix(lang string) string {
+	fixture, err := filepath.Abs(detectFixture)
+	if err != nil {
+		panic(err)
+	}
+	return `for a in "$@"; do
+  if [ "$a" = "-dl" ]; then
+    sed "s/auto-detected language: en /auto-detected language: ` + lang + ` /" "` + fixture + `" >&2
+    exit 0
+  fi
+done
+`
+}
+
+// stubFFmpeg returns a fake ffmpeg that fails at once, so the detection uses
+// the audio as it is. A test with a tight timeout or cancel needs it: the
+// real ffmpeg can take longer than the test waits when the machine is
+// loaded, and then the cancel fires before the whisper-cli stub starts.
+func stubFFmpeg(t *testing.T) string {
+	t.Helper()
+	return writeScript(t, "#!/usr/bin/env bash\nexit 1\n")
+}
+
 // stubThatWritesOutput returns a whisper-cli stub script that locates its
 // own "-of <base>" argument and writes json to "<base>.json" before
-// exiting 0 — the shape every success-path test needs.
+// exiting 0 — the shape every success-path test needs. It answers a
+// detection run (-dl) with English, see detectPrefix.
 func stubThatWritesOutput(json string) string {
+	return stubThatWritesOutputFor("en", json)
+}
+
+// stubThatWritesOutputFor is stubThatWritesOutput with a chosen detected
+// language.
+func stubThatWritesOutputFor(lang, json string) string {
 	return `#!/usr/bin/env bash
-of=""
+` + detectPrefix(lang) + `of=""
 args=("$@")
 for ((i=0; i<${#args[@]}; i++)); do
   if [ "${args[$i]}" = "-of" ]; then
@@ -214,8 +251,8 @@ func TestTranscribe_nonZeroExitClassifiesToolFailure(t *testing.T) {
 func TestTranscribe_missingOutputFileIsToolFailure(t *testing.T) {
 	modelDir := t.TempDir()
 	newModel(t, modelDir, "large-v3-turbo-q5_0")
-	// Exits 0 but never writes <outBase>.json.
-	bin := writeScript(t, "#!/usr/bin/env bash\nexit 0\n")
+	// Exits 0 (also for the detection run) but never writes <outBase>.json.
+	bin := writeScript(t, "#!/usr/bin/env bash\n"+detectPrefix("en")+"exit 0\n")
 
 	tr := New(Config{Binary: bin, ModelDir: modelDir, Timeout: 5 * time.Second})
 	req := domain.TranscribeRequest{AudioPath: newAudioPath(t), Options: domain.Options{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe, BeamSize: 5}}
@@ -243,7 +280,7 @@ func TestTranscribe_timeout(t *testing.T) {
 	newModel(t, modelDir, "large-v3-turbo-q5_0")
 	bin := writeScript(t, "#!/usr/bin/env bash\nsleep 5\n")
 
-	tr := New(Config{Binary: bin, ModelDir: modelDir, Timeout: 200 * time.Millisecond})
+	tr := New(Config{Binary: bin, FFmpegBinary: stubFFmpeg(t), ModelDir: modelDir, Timeout: 200 * time.Millisecond})
 	req := domain.TranscribeRequest{AudioPath: newAudioPath(t), Options: domain.Options{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe, BeamSize: 5}}
 
 	start := time.Now()
@@ -265,7 +302,7 @@ echo "$!" > `+childPIDFile+`
 sleep 5
 `)
 
-	tr := New(Config{Binary: bin, ModelDir: modelDir, Timeout: 10 * time.Second})
+	tr := New(Config{Binary: bin, FFmpegBinary: stubFFmpeg(t), ModelDir: modelDir, Timeout: 10 * time.Second})
 	req := domain.TranscribeRequest{AudioPath: newAudioPath(t), Options: domain.Options{Model: "large-v3-turbo-q5_0", Task: domain.TaskTranscribe, BeamSize: 5}}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -302,7 +339,7 @@ func TestTranscribe_wordTimestampsUsesOJFAndPopulatesWords(t *testing.T) {
 	// producing valid output when it sees -ojf — proving Transcribe's
 	// argv, not just parseWhisperJSON, switches on WordTimestamps.
 	bin := writeScript(t, `#!/usr/bin/env bash
-of=""
+`+detectPrefix("en")+`of=""
 sawOjf=false
 args=("$@")
 for ((i=0; i<${#args[@]}; i++)); do

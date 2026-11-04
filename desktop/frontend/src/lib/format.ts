@@ -3,6 +3,8 @@
  * screens render timestamps, sizes and durations identically.
  */
 
+import type { Transcription } from "./types";
+
 /** Formats bytes as SI units (MB = 10^6), matching what a Linux file manager reports. */
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return "—";
@@ -88,4 +90,36 @@ export function secondsSince(iso: string | undefined | null, now: Date = new Dat
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return undefined;
   return Math.max(0, Math.round((now.getTime() - then) / 1000));
+}
+
+/** English name of an ISO-639 language code ("fr" → "French"), or the code itself when the runtime does not know it. */
+export function languageName(code: string): string {
+  try {
+    return new Intl.DisplayNames(["en"], { type: "language" }).of(code) ?? code;
+  } catch {
+    return code;
+  }
+}
+
+/**
+ * The language line of a job. For a finished job it shows the language the
+ * service detected in the audio and, when it differs, the language of the
+ * transcript: "French → English". Before a result exists the service has not
+ * detected anything yet, and it ignores any language hint in the request, so
+ * the line says "auto-detect".
+ *
+ * A result stored before `outputLanguage` existed has no output language. If
+ * its task was "translate", its text is English, so the line still shows
+ * "→ English" (an old row with a French hint and a translate task shows
+ * "French → English", not "French").
+ */
+export function formatLanguages(transcription: Pick<Transcription, "result">): string {
+  const result = transcription.result;
+  if (!result?.language) return "auto-detect";
+  const detected = languageName(result.language);
+  const output = result.outputLanguage || (result.task === "translate" ? "en" : "");
+  if (output && output !== result.language) {
+    return `${detected} → ${languageName(output)}`;
+  }
+  return detected;
 }

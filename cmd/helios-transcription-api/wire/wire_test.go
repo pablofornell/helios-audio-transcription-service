@@ -41,7 +41,7 @@ func closedPortAddr(t *testing.T) string {
 // ---------------------------------------------------------------------------
 
 func TestBuildTranscriber_selectsWhispercppByDefault(t *testing.T) {
-	tr := buildTranscriber(config.TranscriberConfig{Kind: "whispercpp", Binary: "whisper-cli"}, nil)
+	tr := buildTranscriber(config.TranscriberConfig{Kind: "whispercpp", Binary: "whisper-cli"}, "", nil, nil)
 	_, ok := tr.(*whispercpp.Transcriber)
 	assert.True(t, ok, "expected *whispercpp.Transcriber, got %T", tr)
 }
@@ -63,6 +63,12 @@ func TestBuildTranscriber_forwardsGPUConfiguration(t *testing.T) {
 			bin := filepath.Join(dir, "whisper-cli-stub.sh")
 			require.NoError(t, os.WriteFile(bin, []byte(`#!/usr/bin/env bash
 printf '%s\n' "$@" > "$WHISPER_TEST_ARGS_PATH"
+for a in "$@"; do
+  if [ "$a" = "-dl" ]; then
+    echo 'whisper_full_with_state: auto-detected language: en (p = 0.97)' >&2
+    exit 0
+  fi
+done
 while [ "$#" -gt 0 ]; do
   if [ "$1" = "-of" ]; then
     printf '%s' '{"result":{"language":"en"},"transcription":[]}' > "$2.json"
@@ -71,7 +77,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 `), 0o755))
-			tr := buildTranscriber(config.TranscriberConfig{Kind: "whispercpp", Binary: bin, ModelDir: dir, NoGPU: tt.noGPU, GPUDevice: 2, Timeout: 5 * time.Second}, nil)
+			tr := buildTranscriber(config.TranscriberConfig{Kind: "whispercpp", Binary: bin, ModelDir: dir, NoGPU: tt.noGPU, GPUDevice: 2, Timeout: 5 * time.Second}, "", nil, nil)
 			_, err := tr.Transcribe(context.Background(), domain.TranscribeRequest{AudioPath: filepath.Join(dir, "audio.wav"), Options: domain.Options{Model: "base", Task: domain.TaskTranscribe, BeamSize: 5}})
 			require.NoError(t, err)
 			args, err := os.ReadFile(argsPath)
@@ -86,15 +92,92 @@ done
 	}
 }
 
+// langStub detects $WHISPER_TEST_LANG on -dl and logs every -m value it
+// gets to $WHISPER_TEST_MODELS.
+const langStub = `#!/usr/bin/env bash
+for ((i=1; i<=$#; i++)); do
+  if [ "${!i}" = "-m" ]; then j=$((i+1)); echo "${!j}" >> "$WHISPER_TEST_MODELS"; fi
+done
+for a in "$@"; do
+  if [ "$a" = "-dl" ]; then
+    echo "whisper_full_with_state: auto-detected language: $WHISPER_TEST_LANG (p = 0.97)" >&2
+    exit 0
+  fi
+done
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-of" ]; then
+    printf '%s' '{"result":{"language":"xx"},"transcription":[]}' > "$2.json"
+    break
+  fi
+  shift
+done
+`
+
+// TestBuildTranscriber_forwardsTranslationModel checks that the configured
+// translation model, not the request model, runs a third-language job.
+func TestBuildTranscriber_forwardsTranslationModel(t *testing.T) {
+	dir := t.TempDir()
+	for _, m := range []string{"base", "large-v3"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "ggml-"+m+".bin"), []byte("fake weights"), 0o644))
+	}
+	modelsLog := filepath.Join(dir, "models.log")
+	t.Setenv("WHISPER_TEST_MODELS", modelsLog)
+	t.Setenv("WHISPER_TEST_LANG", "fr")
+	bin := filepath.Join(dir, "whisper-cli-stub.sh")
+	require.NoError(t, os.WriteFile(bin, []byte(langStub), 0o755))
+
+	tr := buildTranscriber(config.TranscriberConfig{Kind: "whispercpp", Binary: bin, ModelDir: dir, TranslationModel: "large-v3", Timeout: 5 * time.Second}, "", nil, nil)
+	got, err := tr.Transcribe(context.Background(), domain.TranscribeRequest{AudioPath: filepath.Join(dir, "audio.wav"), Options: domain.Options{Model: "base", Task: domain.TaskTranscribe, BeamSize: 5}})
+	require.NoError(t, err)
+	assert.Equal(t, "large-v3", got.Model)
+	assert.Equal(t, domain.TaskTranslate, got.Task)
+
+	logged, err := os.ReadFile(modelsLog)
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		filepath.Join(dir, "ggml-base.bin"),     // detection
+		filepath.Join(dir, "ggml-large-v3.bin"), // translation
+	}, strings.Fields(string(logged)))
+}
+
+// TestBuildTranscriber_readyWithoutTranslationModel is the deploy-safety
+// check: the translation weights reach the host later than the code (a push
+// to main deploys at once; `make models` runs by hand). The readiness check
+// must pass without them, and Spanish and English jobs must run.
+func TestBuildTranscriber_readyWithoutTranslationModel(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "ggml-base.bin"), []byte("fake weights"), 0o644))
+	t.Setenv("WHISPER_TEST_MODELS", filepath.Join(dir, "models.log"))
+	t.Setenv("WHISPER_TEST_LANG", "es")
+	bin := filepath.Join(dir, "whisper-cli-stub.sh")
+	require.NoError(t, os.WriteFile(bin, []byte(langStub), 0o755))
+
+	tr := buildTranscriber(config.TranscriberConfig{
+		Kind: "whispercpp", Binary: bin, ModelDir: dir, DefaultModel: "base",
+		TranslationModel: "large-v3-q5_0", Timeout: 5 * time.Second,
+	}, "", nil, nil)
+
+	require.NoError(t, transcriberChecker{transcriber: tr}.Check(context.Background()), "readiness must not need the translation model")
+
+	got, err := tr.Transcribe(context.Background(), domain.TranscribeRequest{AudioPath: filepath.Join(dir, "audio.wav"), Options: domain.Options{Model: "base", Task: domain.TaskTranscribe, BeamSize: 5}})
+	require.NoError(t, err)
+	assert.Equal(t, "es", got.OutputLanguage)
+
+	t.Setenv("WHISPER_TEST_LANG", "fr")
+	_, err = tr.Transcribe(context.Background(), domain.TranscribeRequest{AudioPath: filepath.Join(dir, "audio.wav"), Options: domain.Options{Model: "base", Task: domain.TaskTranscribe, BeamSize: 5}})
+	require.Error(t, err)
+	assert.Equal(t, domain.ErrCodeModelUnavailable, domain.CodeOf(err))
+}
+
 func TestBuildTranscriber_selectsFakeWhenConfigured(t *testing.T) {
-	tr := buildTranscriber(config.TranscriberConfig{Kind: "fake"}, nil)
+	tr := buildTranscriber(config.TranscriberConfig{Kind: "fake"}, "", nil, nil)
 	_, ok := tr.(*fake.Transcriber)
 	assert.True(t, ok, "expected *fake.Transcriber, got %T", tr)
 }
 
 func TestBuildTranscriber_overrideAlwaysWinsRegardlessOfKind(t *testing.T) {
 	override := fake.New(fake.Config{})
-	tr := buildTranscriber(config.TranscriberConfig{Kind: "whispercpp"}, override)
+	tr := buildTranscriber(config.TranscriberConfig{Kind: "whispercpp"}, "", nil, override)
 	assert.Same(t, override, tr)
 }
 

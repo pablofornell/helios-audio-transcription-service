@@ -1,7 +1,12 @@
 package domain
 
-// Task selects what whisper-cli produces for a job: the source-language
-// transcript, or an English translation of it.
+// Task names what whisper-cli does for a job: transcribe in the audio
+// language, or translate to English.
+//
+// A caller can still send Options.Task. The service keeps it for
+// compatibility and ignores it: PlanOutput alone sets the output language
+// from the detected audio language. Result.Task reports what the engine
+// did.
 type Task string
 
 const (

@@ -94,10 +94,36 @@ describe("supported transcription model", () => {
   });
 
   it("submits with the default after restoring a retired saved model", () => {
-    localStorage.setItem("helios.transcribe.composerOptions", JSON.stringify({ model: "base", language: "en" }));
+    localStorage.setItem("helios.transcribe.composerOptions", JSON.stringify({ model: "base", wordTimestamps: true }));
     const submit = vi.fn().mockResolvedValue({ ok: true, id: "accepted" });
     const { container } = render(<Composer variant="collapsed" submit={submit} />);
     upload(container, "turbo.wav");
-    expect(submit).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ model: "", language: "en" }));
+    expect(submit).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ model: "", wordTimestamps: true }));
+  });
+});
+
+
+describe("language detection", () => {
+  it("has no Translate choice, no Task control and no language control", () => {
+    render(<Composer variant="expanded" submit={vi.fn()} />);
+    expect(screen.queryByText(/translate/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Task")).not.toBeInTheDocument();
+    expect(screen.queryByText(/language/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /language/i })).not.toBeInTheDocument();
+  });
+
+  it("submits an empty language and task transcribe, so the server detects the language", () => {
+    const submit = vi.fn().mockResolvedValue({ ok: true, id: "accepted" });
+    const { container } = render(<Composer variant="collapsed" submit={submit} />);
+    upload(container, "speech.wav");
+    expect(submit).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ language: "", task: "transcribe" }));
+  });
+
+  it("does not send a language or a task saved by an older version", () => {
+    localStorage.setItem("helios.transcribe.composerOptions", JSON.stringify({ language: "es", task: "translate" }));
+    const submit = vi.fn().mockResolvedValue({ ok: true, id: "accepted" });
+    const { container } = render(<Composer variant="collapsed" submit={submit} />);
+    upload(container, "speech.wav");
+    expect(submit).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ language: "", task: "transcribe" }));
   });
 });

@@ -572,6 +572,9 @@ components:
 
     Task:
       type: string
+      description: >
+        Request side: accepted and ignored (see Options). Result side: what the
+        engine did.
       enum: [transcribe, translate]
 
     TranscriptFormat:
@@ -604,6 +607,12 @@ components:
         submission: an absent or zero value is filled in by Options.Normalize before
         validation (an empty task becomes "transcribe", a zero beamSize becomes 5, an
         empty or "auto" language means auto-detect).
+
+        The service sets the output language itself. It detects the audio language
+        before it transcribes. Spanish audio gives a Spanish transcript. English
+        audio gives an English transcript. Audio in any other language gives an
+        English transcript, translated. The service accepts `language` and `task`
+        for compatibility and ignores both: neither changes this rule.
       properties:
         model:
           type: string
@@ -613,10 +622,21 @@ components:
             (HELIOS_TRANSCRIBER_DEFAULT_MODEL).
         language:
           type: string
-          description: ISO-639-1/639-2 code (2-3 lowercase letters). Empty or "auto" means auto-detect.
+          description: >
+            Accepted for compatibility. The service ignores it. It always detects
+            the language spoken in the audio, and the detection alone sets the
+            output language. A hint of "fr" on Spanish audio still gives a Spanish
+            transcript. If sent, it is an ISO-639-1/639-2 code (2-3 lowercase
+            letters), or empty or "auto".
         task:
-          $ref: "#/components/schemas/Task"
+          allOf:
+            - $ref: "#/components/schemas/Task"
           default: transcribe
+          description: >
+            Accepted for compatibility. The service ignores it. The output
+            language follows the audio language only (see above), so
+            task=translate on Spanish audio still gives a Spanish transcript.
+            Result.task reports what the engine did.
         wordTimestamps:
           type: boolean
           default: false
@@ -711,15 +731,26 @@ components:
           description: Every Segment's text, space-normalized and joined.
         language:
           type: string
-          description: Detected (Options.language empty/auto) or forced ISO-639-1 code whisper-cli actually used.
+          description: Language spoken in the audio, as the service detected it. The Options.language hint plays no part.
+        outputLanguage:
+          type: string
+          description: >
+            Language of the transcript text: "es" for Spanish audio, "en" for all
+            other audio. Absent on a transcript stored before this field existed.
         durationSeconds:
           type: number
           format: double
         model:
           type: string
-          description: The whisper model name actually used (resolved from Options.model or the configured default).
+          description: >
+            The whisper model name actually used to produce the text. It is the
+            internal translation model (HELIOS_TRANSCRIBER_TRANSLATION_MODEL) when
+            the engine translated, otherwise the model from Options.model or the
+            configured default.
         task:
-          $ref: "#/components/schemas/Task"
+          allOf:
+            - $ref: "#/components/schemas/Task"
+          description: What the engine did. "translate" only when it translated audio in a third language to English.
         segments:
           type: array
           items:

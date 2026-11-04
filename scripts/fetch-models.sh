@@ -5,8 +5,16 @@
 #
 #   ./scripts/fetch-models.sh [model ...]
 #
-# With no arguments, fetch the only supported model: large-v3-turbo-q5_0.
-# Explicit model arguments must use that exact quantized model name.
+# With no arguments, fetch both models the service uses:
+#
+#   large-v3-turbo-q5_0  transcribes Spanish and English audio, and detects
+#                        the audio language.
+#   large-v3-q5_0        translates audio in any other language to English.
+#                        The turbo model cannot translate.
+#
+# Explicit model arguments must use one of those two exact names. The service
+# starts and reports ready with the turbo model alone. A job with audio in a
+# third language fails with model_unavailable until large-v3-q5_0 is present.
 set -euo pipefail
 
 # models_dir is relative to this script's own location, not the caller's
@@ -22,13 +30,13 @@ base_url="https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
 
 models=("$@")
 if [ ${#models[@]} -eq 0 ]; then
-	models=("large-v3-turbo-q5_0")
+	models=("large-v3-turbo-q5_0" "large-v3-q5_0")
 fi
 
 # Reject the whole request before creating files or starting downloads.
 for model in "${models[@]}"; do
-	if [[ "${model}" != "large-v3-turbo-q5_0" ]]; then
-		echo "Unsupported model: ${model}; only large-v3-turbo-q5_0 is supported" >&2
+	if [[ "${model}" != "large-v3-turbo-q5_0" && "${model}" != "large-v3-q5_0" ]]; then
+		echo "Unsupported model: ${model}; supported models are large-v3-turbo-q5_0 and large-v3-q5_0" >&2
 		exit 2
 	fi
 done

@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Options, Task } from "../../lib";
+import type { Options } from "../../lib";
 
 /*
- * Submit-time composer options (Model / Language / Task / Word timestamps)
- * — persisted in localStorage and restored per session. `initialPrompt`,
- * `beamSize` and `temperature` have no UI here (DESKTOP.md's brief lists
- * only these four); they are carried at their domain.DefaultOptions()
- * zero values and the server's own Options.Normalize fills in its actual
- * defaults (beam size 5, transcribe, auto-detect) from an empty/zero
- * field, so submitting them untouched is always well-formed.
+ * Submit-time composer options (Model / Word timestamps) — persisted in
+ * localStorage and restored per session. The service detects the audio
+ * language itself and ignores any language hint, so the composer has no
+ * language control: `language` is always sent empty, and a language saved
+ * by an older version is dropped on load. `task` has no UI either; it is
+ * always sent as "transcribe" for compatibility and the server ignores it.
+ * `initialPrompt`, `beamSize` and `temperature` have no UI here; they are
+ * carried at their domain.DefaultOptions() zero values and the server's own
+ * Options.Normalize fills in its actual defaults (beam size 5, transcribe)
+ * from an empty/zero field, so submitting them untouched is always
+ * well-formed.
  */
 
 const STORAGE_KEY = "helios.transcribe.composerOptions";
@@ -25,20 +29,15 @@ export const DEFAULT_OPTIONS: Options = {
   temperature: 0,
 };
 
-const VALID_TASKS: Task[] = ["transcribe", "translate"];
-
 function loadOptions(): Options {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_OPTIONS;
     const parsed = JSON.parse(raw) as Partial<Options>;
-    const task = VALID_TASKS.includes(parsed.task as Task) ? (parsed.task as Task) : DEFAULT_OPTIONS.task;
     return {
       ...DEFAULT_OPTIONS,
       // Retired or foreign saved models fall back to the supported server default.
       model: parsed.model === SUPPORTED_MODEL ? parsed.model : DEFAULT_OPTIONS.model,
-      language: typeof parsed.language === "string" ? parsed.language : DEFAULT_OPTIONS.language,
-      task,
       wordTimestamps: Boolean(parsed.wordTimestamps),
     };
   } catch {
@@ -51,8 +50,6 @@ function loadOptions(): Options {
 function isDefault(options: Options): boolean {
   return (
     options.model === DEFAULT_OPTIONS.model &&
-    options.language === DEFAULT_OPTIONS.language &&
-    options.task === DEFAULT_OPTIONS.task &&
     !options.wordTimestamps
   );
 }

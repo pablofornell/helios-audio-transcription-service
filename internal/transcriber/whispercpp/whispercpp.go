@@ -19,13 +19,27 @@
 // extra, never-actually-emitted pattern costs nothing and keeps this
 // package correct if a future whisper.cpp release changes its convention
 // or a differently-built vocab file introduces such a token.
+//
+// Transcribe always detects the audio language first (one or more
+// whisper-cli -dl runs, see detectLanguage). domain.PlanOutput turns the
+// result into the output language. A last whisper-cli run transcribes or
+// translates. A language hint in the request plays no part. -dl and -tr were
+// checked on the v1.9.4 tag: both exist, and -dl prints
+// "auto-detected language: <code> (p = <prob>)" on stderr.
 package whispercpp
 
-import "time"
+import (
+	"log/slog"
+	"time"
+)
 
 // DefaultBinary is the executable name used when Config.Binary is empty,
 // resolved via the process's PATH.
 const DefaultBinary = "whisper-cli"
+
+// DefaultFFmpegBinary is the ffmpeg name used when Config.FFmpegBinary is
+// empty, resolved via the process's PATH.
+const DefaultFFmpegBinary = "ffmpeg"
 
 // defaultThreads and defaultTimeout are used when the corresponding Config
 // field is zero or negative, mirroring BLUEPRINT ytdlp.New's defaulting
@@ -36,11 +50,22 @@ const (
 	defaultTimeout = 30 * time.Minute
 )
 
+// DefaultTranslationModel is used when Config.TranslationModel is empty.
+// Real values come from internal/config (HELIOS_TRANSCRIBER_TRANSLATION_MODEL).
+const DefaultTranslationModel = "large-v3-q5_0"
+
 // Config configures a Transcriber.
 type Config struct {
 	// Binary is the whisper-cli executable: an absolute path, or a name
 	// resolved via PATH. Defaults to DefaultBinary.
 	Binary string
+	// FFmpegBinary is the ffmpeg executable the language detection uses to
+	// cut a clip out of the audio (see detectLanguage). Defaults to
+	// DefaultFFmpegBinary. The runtime image already has ffmpeg for the
+	// audio conversion.
+	FFmpegBinary string
+	// Logger receives the detection log lines. Defaults to slog.Default().
+	Logger *slog.Logger
 	// ModelDir holds the ggml-<model>.bin weight files. See modelPath.
 	ModelDir string
 	// DefaultModel is the model Available checks actually exists on disk
@@ -53,6 +78,13 @@ type Config struct {
 	// from config.TranscriberConfig.DefaultModel, which Config.Validate
 	// already requires to be non-empty.
 	DefaultModel string
+	// TranslationModel is the model that translates audio in a third
+	// language (not Spanish, not English) to English. The turbo model
+	// cannot translate. Available does NOT check this file: a deploy
+	// without it must still start and be ready, because Spanish and
+	// English jobs do not need it. Transcribe checks it only for a job that
+	// does. Defaults to DefaultTranslationModel.
+	TranslationModel string
 	// Threads is the -t value passed to whisper-cli. Defaults to
 	// defaultThreads.
 	Threads int
@@ -63,8 +95,9 @@ type Config struct {
 	// GPUDevice is the --device index when NoGPU is false. Defaults to 0.
 	GPUDevice int
 	// Timeout is the hard ceiling on any single Transcribe call, enforced
-	// regardless of what the caller's ctx allows — see command in
-	// process.go. Defaults to defaultTimeout.
+	// regardless of what the caller's ctx allows — see Transcribe. The
+	// ceiling covers language detection and transcription together.
+	// Defaults to defaultTimeout.
 	Timeout time.Duration
 }
 
@@ -80,6 +113,15 @@ type Transcriber struct {
 func New(cfg Config) *Transcriber {
 	if cfg.Binary == "" {
 		cfg.Binary = DefaultBinary
+	}
+	if cfg.FFmpegBinary == "" {
+		cfg.FFmpegBinary = DefaultFFmpegBinary
+	}
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
+	if cfg.TranslationModel == "" {
+		cfg.TranslationModel = DefaultTranslationModel
 	}
 	if cfg.Threads <= 0 {
 		cfg.Threads = defaultThreads

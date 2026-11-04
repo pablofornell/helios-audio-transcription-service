@@ -33,21 +33,36 @@ quantized `large-v3-turbo-q5_0` model for new submissions. Both
 `ggml-large-v3-turbo-q5_0.bin` under `HELIOS_TRANSCRIBER_MODEL_DIR` (default
 `/models`). ATS does not download weights automatically.
 
+ATS also uses a second model, `large-v3-q5_0` (`HELIOS_TRANSCRIBER_TRANSLATION_MODEL`),
+for audio in a third language (not Spanish, not English). The turbo model is not
+trained for translation: with `-tr` it returns the original language. The translation
+model is an internal choice, not a request option, and it is not in
+`HELIOS_TRANSCRIBER_ALLOWED_MODELS`. Its weights are
+`ggml-large-v3-q5_0.bin` in the same directory.
+
 1. Outside Docker, build or install `whisper-cli` from
    [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) and put it on
    `PATH`, or point `HELIOS_TRANSCRIBER_BINARY` at it directly.
-2. Run `make models` to fetch the supported weights into this repository's
-   `./models`. For a native deployment with another model directory, use:
+2. Run `make models` to fetch both weights into this repository's `./models`
+   (`make models MODEL=large-v3-q5_0` fetches one). For a native deployment with
+   another model directory, use:
    ```
    ./models/download-ggml-model.sh large-v3-turbo-q5_0 /models
+   ./models/download-ggml-model.sh large-v3-q5_0 /models
    ```
-   from the whisper.cpp repository, or fetch `ggml-large-v3-turbo-q5_0.bin` from
+   from the whisper.cpp repository, or fetch `ggml-large-v3-turbo-q5_0.bin` and
+   `ggml-large-v3-q5_0.bin` from
    [huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp)
    into `HELIOS_TRANSCRIBER_MODEL_DIR`.
 
 A missing default model makes the service unready: `Transcriber.Available`
 confirms that the model directory is readable and that the configured model file
-is present. Submissions naming another model are rejected as invalid input.
+is present. It does **not** check the translation model. A deploy without
+`ggml-large-v3-q5_0.bin` starts, reports ready, and transcribes Spanish and English
+audio. A job with audio in a third language fails with `model_unavailable` until the
+file is present (see **When a model is missing**, below). The bind mount is
+`../models:/models:ro`, so the file must exist on the host: run `make models` there
+after the deploy. Submissions naming another model are rejected as invalid input.
 Existing jobs and transcripts keep their historical model names; no database
 migration or deletion is required. Old browser composer selections reset to the
 supported server default when loaded.
@@ -59,7 +74,10 @@ Ubuntu 24.04 for its Vulkan build/runtime dependencies, as in the
 [upstream Vulkan image](https://github.com/ggml-org/whisper.cpp/blob/v1.9.4/.devops/main-vulkan.Dockerfile).
 Vulkan works through the host's Linux `amdgpu` kernel driver and the container's
 [Mesa RADV driver](https://docs.mesa3d.org/drivers/radv.html). It does not require
-ROCm or `/dev/kfd`. The default model is `large-v3-turbo-q5_0`. The GPU shares RAM with the CPU;
+ROCm or `/dev/kfd`. The default model is `large-v3-turbo-q5_0`. The translation model
+`large-v3-q5_0` is about twice as large and slower. A job runs its processes one after
+the other (detection, then transcription), so one job never holds two models at once.
+The GPU shares RAM with the CPU;
 use four CPU threads and one worker on the 7730U. These are starting settings, not a throughput
 guarantee. Compare representative audio in GPU and CPU mode.
 
@@ -92,7 +110,7 @@ root user is needed. `VK_DRIVER_FILES` selects RADV only, preventing lavapipe so
 from being mistaken for GPU acceleration. `HELIOS_TRANSCRIBER_GPU_DEVICE` is the
 whisper-cli GPU index, independent of the render node number.
 
-Fetch the default weights with `make models`, then use `make compose-up-vulkan`
+Fetch the weights with `make models`, then use `make compose-up-vulkan`
 (equivalent to Compose with both `deploy/docker-compose.yml` and
 `deploy/docker-compose.vulkan.yml`). Keep both files in subsequent Compose
 operations that recreate containers. The ordinary base Compose remains usable on
@@ -313,18 +331,23 @@ the supported model rather than fetching obsolete weights.
 
 A job fails with `error.code: "model_unavailable"` (not retried automatically — see
 `docs/ARCHITECTURE.md`'s retry policy) when `HELIOS_TRANSCRIBER_MODEL_DIR` has no
-`ggml-large-v3-turbo-q5_0.bin` for a supported transcription. Restore
-the file, then retry the job(s):
+`ggml-large-v3-turbo-q5_0.bin` for a supported transcription, or no
+`ggml-large-v3-q5_0.bin` for audio in a third language. The error message names the
+missing model. Restore the file, then retry the job(s):
 
 ```
 ls "$HELIOS_TRANSCRIBER_MODEL_DIR"        # confirm what's actually there
-./models/download-ggml-model.sh large-v3-turbo-q5_0 "$HELIOS_TRANSCRIBER_MODEL_DIR"   # fetch it (see Prerequisites)
+make models                                # on the host: fetches both models, skips present files
 curl -X POST localhost:7462/api/v1/transcriptions/<id>/retry
 ```
 
+The service never falls back to the turbo model for a translation: turbo would return
+the original language, so the job fails instead. The desktop app shows a Retry control
+for this code. The retry endpoint re-queues any `failed` job, whatever its error code.
+
 There's no bulk-retry endpoint; script over
 `GET /api/v1/transcriptions?status=failed` if you need one. If several jobs failed for
-the missing turbo model, restoring the weights and retrying each is the correct fix, not
+the missing model, restoring the weights and retrying each is the correct fix, not
 raising `HELIOS_WORKER_MAX_ATTEMPTS` — a missing file will not appear on its own no
 matter how many attempts are configured, which is exactly why this code is not in
 `ErrorCode.Retryable()`'s set.

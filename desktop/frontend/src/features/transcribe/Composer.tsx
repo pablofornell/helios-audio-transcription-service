@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
-import { EmptyState, Segmented, Select, Switch } from "../../components";
-import { chooseAudioFile, getServerSettingsVersion, useServerSettingsVersion, type AudioSource, type Options, type Task } from "../../lib";
+import { EmptyState, Select, Switch } from "../../components";
+import { chooseAudioFile, getServerSettingsVersion, useServerSettingsVersion, type AudioSource, type Options } from "../../lib";
 import { hasWailsRuntime } from "../../lib/runtime";
 import { SUPPORTED_MODEL, useComposerOptions } from "./useComposerOptions";
 import type { SubmitOutcome } from "./useTranscribeQueue";
@@ -12,41 +12,11 @@ export interface ComposerProps {
   submit: (source: AudioSource, options: Options) => Promise<SubmitOutcome>;
 }
 
-const TASK_OPTIONS: { value: Task; label: string }[] = [
-  { value: "transcribe", label: "Transcribe" },
-  { value: "translate", label: "Translate to English" },
-];
-
 // Empty Model uses the configured default; explicit selection uses the same
 // supported quantized turbo model.
 const MODEL_OPTIONS = [
   { value: "", label: "Server default" },
   { value: SUPPORTED_MODEL, label: SUPPORTED_MODEL },
-];
-
-// ISO-639-1/639-2 codes domain.Options.Validate accepts (2-3 lowercase
-// letters) — a representative set of whisper.cpp's supported languages,
-// not an exhaustive one. "" is "Auto-detect" (domain.Options.AutoDetectLanguage).
-const LANGUAGE_OPTIONS = [
-  { value: "", label: "Auto-detect" },
-  { value: "en", label: "English" },
-  { value: "es", label: "Spanish" },
-  { value: "fr", label: "French" },
-  { value: "de", label: "German" },
-  { value: "it", label: "Italian" },
-  { value: "pt", label: "Portuguese" },
-  { value: "nl", label: "Dutch" },
-  { value: "ru", label: "Russian" },
-  { value: "zh", label: "Chinese" },
-  { value: "ja", label: "Japanese" },
-  { value: "ko", label: "Korean" },
-  { value: "ar", label: "Arabic" },
-  { value: "hi", label: "Hindi" },
-  { value: "tr", label: "Turkish" },
-  { value: "pl", label: "Polish" },
-  { value: "sv", label: "Swedish" },
-  { value: "uk", label: "Ukrainian" },
-  { value: "vi", label: "Vietnamese" },
 ];
 
 /** Base name of a filesystem path, tolerant of both `/` and `\` separators (a dropped OS path can carry either, depending on platform). */
@@ -57,7 +27,8 @@ function basename(path: string): string {
 
 /**
  * The composer — a drop zone + file picker, plus the real transcription
- * options (model, language, task, word timestamps). One component, two
+ * options (model, word timestamps). There is no language control: the
+ * service detects the audio language itself and ignores any hint. One component, two
  * layouts: `expanded` (first run, fills the surface) and `collapsed` (a
  * docked bar once a row exists) share every field, handler and piece of
  * state below; only the surrounding chrome differs, so the two can never
@@ -218,14 +189,6 @@ export function Composer({ variant, submit }: ComposerProps) {
       <div className={styles.optionGroup}>
         <span className={styles.optionLabel}>Model</span>
         <Select label="Model" options={MODEL_OPTIONS} value={options.model} onChange={(v) => setOptions({ ...options, model: v })} />
-      </div>
-      <div className={styles.optionGroup}>
-        <span className={styles.optionLabel}>Language</span>
-        <Select label="Language" options={LANGUAGE_OPTIONS} value={options.language} onChange={(v) => setOptions({ ...options, language: v })} />
-      </div>
-      <div className={styles.optionGroup}>
-        <span className={styles.optionLabel}>Task</span>
-        <Segmented label="Task" options={TASK_OPTIONS} value={options.task} onChange={(v) => setOptions({ ...options, task: v as Task })} />
       </div>
       <Switch
         label="Word timestamps"

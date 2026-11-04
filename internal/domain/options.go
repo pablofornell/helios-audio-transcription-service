@@ -38,10 +38,13 @@ type Options struct {
 	// Model is the whisper model name, "large-v3-turbo-q5_0". Empty means
 	// the configured default model.
 	Model string `json:"model"`
-	// Language is an ISO-639-1 code. Empty or "auto" means auto-detect.
+	// Language is accepted for compatibility and ignored. The service
+	// always detects the language spoken in the audio before it
+	// transcribes; the detection alone sets the output language (see
+	// PlanOutput). A wrong hint used to give a wrong transcript.
 	Language string `json:"language"`
-	// Task selects transcription in the source language or translation to
-	// English. See Task.
+	// Task is accepted for compatibility and ignored. The output language
+	// follows PlanOutput. See Task.
 	Task Task `json:"task"`
 	// WordTimestamps, when true, asks whisper-cli to emit per-word timings
 	// (its -ojf mode) instead of just per-segment ones.
@@ -137,10 +140,10 @@ func (o Options) Validate(allowedModels []string) error {
 	return nil
 }
 
-// AutoDetectLanguage reports whether whisper-cli should be asked to detect
-// the spoken language itself rather than being told one. True whenever
-// Language is empty — which, after Normalize, is also what a caller-supplied
-// "auto" becomes.
+// AutoDetectLanguage reports whether the request carries no language hint.
+// True whenever Language is empty — which, after Normalize, is also what a
+// caller-supplied "auto" becomes. It does not change what the service does:
+// the service ignores the hint and always detects the language.
 func (o Options) AutoDetectLanguage() bool {
 	return o.Language == ""
 }

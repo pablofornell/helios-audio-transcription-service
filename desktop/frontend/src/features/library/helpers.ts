@@ -1,11 +1,10 @@
-import { formatDuration, formatRelative, type Status, type Transcription } from "../../lib";
+import { formatDuration, formatLanguages, formatRelative, type Status, type Transcription } from "../../lib";
 
-/** Builds the Library row's meta line: `task · model · language · duration · relative date`. */
+/** Builds the Library row's meta line: `model · language · duration · relative date`. */
 export function buildLibraryMeta(transcription: Transcription): string {
   const segments: string[] = [];
-  segments.push(transcription.options.task === "translate" ? "translate" : "transcribe");
-  segments.push(transcription.options.model || "default model");
-  segments.push(transcription.options.language || "auto-detect");
+  segments.push(transcription.result?.model || transcription.options.model || "default model");
+  segments.push(formatLanguages(transcription));
   segments.push(formatDuration(transcription.audio.durationSeconds));
   segments.push(formatRelative(transcription.completedAt ?? transcription.createdAt));
   return segments.join(" · ");
