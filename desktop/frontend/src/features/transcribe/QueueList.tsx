@@ -24,6 +24,8 @@ export interface QueueListProps {
   hasMore?: boolean;
   loadingMore?: boolean;
   onLoadMore?: () => void;
+  /** True when rows exist on the server, even if none is visible (for example after "Clear completed"). */
+  hasHistory?: boolean;
 }
 
 const SKELETON_ROWS = 3;
@@ -57,8 +59,8 @@ function queueSections(rows: QueueRowModel[]) {
 /**
  * The Queue proper — ACTIVE / RECENT sections, each row fixed at 64px
  * regardless of status. Renders nothing at all when there is truly nothing
- * ever transcribed (`rows.length === 0`): the expanded first-run composer
- * is the entire screen at that point.
+ * ever transcribed (no rows, no older rows, no hidden rows): the expanded
+ * first-run composer is the entire screen at that point.
  */
 export function QueueList({
   rows,
@@ -75,6 +77,7 @@ export function QueueList({
   hasMore = false,
   loadingMore = false,
   onLoadMore,
+  hasHistory = false,
 }: QueueListProps) {
   const now = useClockTick();
   const toast = useToast();
@@ -97,7 +100,7 @@ export function QueueList({
     );
   }
 
-  if (rows.length === 0) return null;
+  if (rows.length === 0 && !hasMore && !hasHistory) return null;
 
   const { activeRows, recentRows } = queueSections(rows);
 
@@ -111,8 +114,12 @@ export function QueueList({
     if (!removalTarget) return;
     setRemoving(true);
     try {
-      await deleteTranscription(removalTarget.id);
-      // Older rows only leave the cache when told, so tell it now.
+      try {
+        await deleteTranscription(removalTarget.id);
+      } catch (err) {
+        // The server no longer has the row, so the removal is done.
+        if (!(err instanceof HeliosError && err.code === "not_found")) throw err;
+      }
       transcriptionStore.forget(removalTarget.id);
       setRemovalTarget(undefined);
     } catch (err) {
@@ -125,7 +132,7 @@ export function QueueList({
 
   return (
     <div className={styles.container}>
-      {activeRows.length === 0 && recentRows.length > 0 ? (
+      {activeRows.length === 0 && (recentRows.length > 0 || hasHistory || hasMore) ? (
         <EmptyState variant="inline">
           Queue is clear.{" "}
           {onOpenLibrary ? (

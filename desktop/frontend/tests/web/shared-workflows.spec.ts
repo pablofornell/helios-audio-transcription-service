@@ -76,6 +76,14 @@ test('Queue keeps failed rows after Clear completed', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Clear completed', exact: true })).toHaveCount(0);
 });
 
+test('Clear completed on a queue of only succeeded rows keeps the queue, not the first-run screen', async ({ page }) => {
+  const rows = [item('done-a'), item('done-b')]; await mockService(page, () => rows); await page.goto('/');
+  await page.getByRole('button', { name: 'Clear completed', exact: true }).click();
+  await expect(page.getByText('done-a.wav', { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/Queue is clear/)).toBeVisible();
+  await expect(page.getByRole('button', { name: /2 items in Library/ })).toBeVisible();
+});
+
 test('Open detail updates when a polled transcription completes', async ({ page }) => {
   let rows = [item('live', 'running')]; await mockService(page, () => rows); await page.goto('/');
   await page.getByText('live.wav', { exact: true }).dblclick();

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryScreen } from "./LibraryScreen";
-import type { Transcription } from "../../lib";
+import { HeliosError, type Transcription } from "../../lib";
 
 const { removeItem, deleteTranscription, show } = vi.hoisted(() => ({
   removeItem: vi.fn(), deleteTranscription: vi.fn(), show: vi.fn(),
@@ -67,6 +67,25 @@ describe("LibraryScreen delete dialog sessions", () => {
     expect(deleteTranscription).toHaveBeenCalledTimes(2);
     await act(async () => finishB());
     expect(screen.queryByTestId("delete-dialog")).not.toBeInTheDocument();
+  });
+
+  it("treats not_found as a finished deletion and shows no error", async () => {
+    deleteTranscription.mockRejectedValueOnce(new HeliosError("not_found", "gone"));
+    render(<LibraryScreen />);
+    fireEvent.click(screen.getByText("Open A"));
+    await act(async () => { fireEvent.click(screen.getByText("Confirm delete")); });
+    expect(removeItem).toHaveBeenCalledWith("a");
+    expect(show).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("delete-dialog")).not.toBeInTheDocument();
+  });
+
+  it("shows an error for another delete failure", async () => {
+    deleteTranscription.mockRejectedValueOnce(new HeliosError("internal", "boom"));
+    render(<LibraryScreen />);
+    fireEvent.click(screen.getByText("Open A"));
+    await act(async () => { fireEvent.click(screen.getByText("Confirm delete")); });
+    expect(removeItem).not.toHaveBeenCalled();
+    expect(show).toHaveBeenCalledTimes(1);
   });
 
   it("fences a canceled session when the same id is reopened", async () => {

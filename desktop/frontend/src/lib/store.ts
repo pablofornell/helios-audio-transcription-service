@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { get, list } from "./api";
+import { list } from "./api";
 import { HeliosError } from "./errors";
 import type { Status, Transcription } from "./types";
 
@@ -21,15 +21,19 @@ import type { Status, Transcription } from "./types";
  * job resolves.
  *
  * Reach: the queue is the only list of failed, canceled and active jobs, so
- * this store must reach every row. Each `refresh()` fetches the newest page
- * (`PAGE_SIZE` items, `createdAt` descending — the API's default order and
- * its maximum page size). When more rows exist, it also follows cursors for
- * the `running` and `pending` statuses, so every active job loads and can be
- * canceled. A normal poll with one page costs one request. Older rows load
- * on request with `loadMore()` and then stay in the cache. A cached row that
- * is older than the newest page keeps its last known state. If that state
- * is active, the next refresh reads the row again with `get()`. Use
- * `forget()` after a delete.
+ * this store must reach every row. The store remembers how many pages the
+ * user has loaded (`pages`, starting at 1). Each refresh walks those pages
+ * from the newest (`PAGE_SIZE` items per page, `createdAt` descending — the
+ * API's default order and its maximum page size). When older rows remain, it
+ * also walks the `running` and `pending` statuses, so every active job loads
+ * and can be canceled. Then it REPLACES the cache with that result, so every
+ * row shown is as current as the server. A poll with one page costs one
+ * request. `loadMore()` raises `pages` by one. A row that falls off the
+ * walked pages leaves the cache and returns with "load more". Use `forget()`
+ * after a delete.
+ *
+ * A refresh that a server change or a newer refresh made obsolete never
+ * touches the cache.
  *
  * Library's own filtered, cursor-paginated view calls `list()` from `./api`
  * directly.
@@ -73,12 +77,13 @@ class TranscriptionStore {
   // undefined between calls — a plain boolean would let
   // resetForServerChange's forced refresh() get skipped by this same
   // dedupe guard while the old server's request is still outstanding.
-  private inFlightGen: number | undefined;
-  // Cursor for the next older page, and whether `loadMore()` ran. Until it
-  // runs, every refresh moves the cursor to the end of the newest page.
+  // Counts refreshes. Only the newest refresh may apply its result.
+  private latest = 0;
+  // How many pages of rows a refresh walks (see this module's doc).
+  private pages = 1;
+  // Cursor for the page after the walked pages, or undefined when none remain.
   private olderCursor: string | undefined;
-  private moreLoaded = false;
-  private loadingMoreGen: number | undefined;
+  private loadingMore = false;
 
   getSnapshot = (): TranscriptionStoreSnapshot => this.snapshot;
 
@@ -99,84 +104,46 @@ class TranscriptionStore {
   };
 
   /**
-   * Re-fetches the newest page and every active job from the server and
-   * rebuilds the cache (see this module's doc for the older rows it keeps).
-   * Safe to call any time, including manually (e.g. right after
-   * a submit/cancel/retry so the UI doesn't wait out a full poll
-   * interval). `gen` is snapshotted up front: if `resetForServerChange()`
-   * bumps `generation` again before `list()` (built from whatever
-   * `apiBase()` was effective when this call started — see `./api.ts`)
-   * resolves, this call's result describes a server that is no longer the
-   * effective one, so it is discarded rather than published or used to
-   * reschedule the next poll.
+   * Walks the loaded pages and the active jobs, then replaces the cache. Safe
+   * to call any time, including manually (e.g. right after a
+   * submit/cancel/retry so the UI doesn't wait out a full poll interval). A
+   * call that starts while another is in flight makes the older call
+   * obsolete. `gen` is snapshotted up front: if `resetForServerChange()`
+   * bumps `generation` before `list()` (built from whatever `apiBase()` was
+   * effective when this call started — see `./api.ts`) resolves, this call's
+   * result describes a server that is no longer the effective one, so it is
+   * discarded rather than published or used to reschedule the next poll.
    */
-  refresh = async (): Promise<void> => {
-    if (this.inFlightGen !== undefined) return;
-    const gen = this.generation;
-    this.inFlightGen = gen;
-    try {
-      const page = await list({ limit: PAGE_SIZE });
-      const live = new Map(page.items.map((t) => [t.id, t]));
-      // More rows exist than one page holds: also load every active job.
-      if (page.nextCursor) {
-        for (const status of ACTIVE_STATUSES) {
-          for (let cursor: string | undefined; ; ) {
-            const active = await list({ limit: PAGE_SIZE, status, cursor });
-            for (const t of active.items) live.set(t.id, t);
-            if (!active.nextCursor) break;
-            cursor = active.nextCursor;
-          }
-        }
-      }
-      // With one page only, the page holds every row.
-      const last = page.nextCursor ? page.items.at(-1) : undefined;
-      const stale = this.staleRows(live, last);
-      const reread = stale.length ? await this.reread(stale, gen) : new Map<string, Transcription | null>();
-      if (gen !== this.generation) return;
-      this.byId = this.merge(live, last, reread);
-      if (!page.nextCursor) {
-        this.olderCursor = undefined;
-        this.moreLoaded = false;
-      } else if (!this.moreLoaded) {
-        this.olderCursor = page.nextCursor;
-      }
-      this.publish({ loading: false, error: undefined, lastSyncAt: Date.now() });
-    } catch (err) {
-      if (gen !== this.generation) return;
-      const heliosErr = err instanceof HeliosError ? err : new HeliosError("unknown", String(err));
-      this.publish({ loading: false, error: heliosErr });
-    } finally {
-      if (this.inFlightGen === gen) this.inFlightGen = undefined;
-      if (gen === this.generation) this.scheduleNext();
-    }
-  };
+  refresh = (): Promise<void> => this.run(true);
 
   /**
-   * Loads the next page of older rows into the cache. Does nothing when no
-   * older rows exist or a load is already in flight. Rejects when the request
-   * fails, so the caller can tell the user.
+   * Loads the next page of older rows. Does nothing when no older rows exist
+   * or a load is already in flight. Rejects when the request fails, so the
+   * caller can tell the user.
    */
   loadMore = async (): Promise<void> => {
-    const cursor = this.olderCursor;
-    if (!cursor || this.loadingMoreGen !== undefined) return;
+    if (this.olderCursor === undefined || this.loadingMore) return;
     const gen = this.generation;
-    this.loadingMoreGen = gen;
+    this.loadingMore = true;
+    this.pages++;
     this.publish({});
     try {
-      const page = await list({ limit: PAGE_SIZE, cursor });
-      if (gen !== this.generation) return;
-      for (const t of page.items) this.byId.set(t.id, t);
-      this.moreLoaded = true;
-      this.olderCursor = page.nextCursor;
+      await this.run(false);
+    } catch (err) {
+      if (gen === this.generation) this.pages--;
+      throw err;
     } finally {
-      if (this.loadingMoreGen === gen) this.loadingMoreGen = undefined;
-      if (gen === this.generation) this.publish({});
+      if (gen === this.generation) {
+        this.loadingMore = false;
+        this.publish({});
+      }
     }
   };
 
-  /** Removes a row from the cache right away, for a row the user just deleted. */
+  /** Removes a row from the cache right away, for a row the user just deleted, then refreshes so no walk that was in flight brings it back. */
   forget = (id: string): void => {
     if (this.byId.delete(id)) this.publish({});
+    this.refreshNow();
   };
 
   /** Cancels any pending poll timer and refreshes immediately — for an action (submit, cancel, retry, delete) that just changed server state and wants the UI to reflect it without waiting out the current interval. */
@@ -187,65 +154,65 @@ class TranscriptionStore {
 
   /**
    * `refreshNow()`'s counterpart for Settings -> Server: bumps
-   * `generation` and clears `inFlightGen` before calling `refresh()`, so a
-   * fresh request against the new `apiBase()` starts immediately even
-   * while the previous one (still built against the old server) is
-   * outstanding — that older call's dedupe slot is abandoned, and once it
-   * eventually resolves, `refresh()`'s own `gen` check discards its result
-   * instead of letting rows from the old server land in the cache after
-   * the new server's own, correct ones already did. Call this right after
-   * `setServerSettings` resolves.
+   * `generation` before calling `refresh()`, so a fresh walk against the new
+   * `apiBase()` starts immediately even while the previous one (still built
+   * against the old server) is outstanding. Once the old walk resolves,
+   * `run()`'s own checks discard its result instead of letting rows from the
+   * old server land in the cache after the new server's own, correct ones
+   * already did. Call this right after `setServerSettings` resolves.
    */
   resetForServerChange = (): void => {
     if (this.timer) clearTimeout(this.timer);
     this.generation++;
-    this.inFlightGen = undefined;
-    this.loadingMoreGen = undefined;
-    // Rows and cursors of the old server must not carry over.
+    this.loadingMore = false;
+    // Rows, cursors and loaded pages of the old server must not carry over.
     this.byId = new Map();
     this.olderCursor = undefined;
-    this.moreLoaded = false;
+    this.pages = 1;
     void this.refresh();
   };
 
-  /** The cached active rows that the refresh did not return. They are older than the newest page and have since finished. */
-  private staleRows(live: Map<string, Transcription>, last: Transcription | undefined): Transcription[] {
-    if (!last) return [];
-    return [...this.byId.values()].filter((t) => !live.has(t.id) && isOlder(t, last) && (t.status === "pending" || t.status === "running"));
-  }
-
-  /** Reads the given rows again. A value of `null` means the server no longer has the row. */
-  private async reread(rows: Transcription[], gen: number): Promise<Map<string, Transcription | null>> {
-    const reread = new Map<string, Transcription | null>();
-    // Bound the number of concurrent requests.
-    for (let start = 0; start < rows.length && gen === this.generation; start += 8) {
-      await Promise.all(rows.slice(start, start + 8).map(async (t) => {
-        try {
-          reread.set(t.id, await get(t.id));
-        } catch (err) {
-          if (err instanceof HeliosError && err.code === "not_found") reread.set(t.id, null);
-        }
-      }));
+  private async run(reportError: boolean): Promise<void> {
+    const gen = this.generation;
+    const mine = ++this.latest;
+    const current = () => gen === this.generation && mine === this.latest;
+    try {
+      const walked = await this.walk(this.pages);
+      if (!current()) return;
+      this.byId = new Map(walked.rows.map((t) => [t.id, t]));
+      this.olderCursor = walked.cursor;
+      this.publish({ loading: false, error: undefined, lastSyncAt: Date.now() });
+    } catch (err) {
+      if (!current()) return;
+      if (!reportError) throw err;
+      const heliosErr = err instanceof HeliosError ? err : new HeliosError("unknown", String(err));
+      this.publish({ loading: false, error: heliosErr });
+    } finally {
+      if (current()) this.scheduleNext();
     }
-    return reread;
   }
 
-  /**
-   * Builds the cache after a refresh. A cached row that the refresh did not
-   * return is kept only when it is older than the newest page. A newer row
-   * that is missing was deleted.
-   */
-  private merge(live: Map<string, Transcription>, last: Transcription | undefined, reread: Map<string, Transcription | null>): Map<string, Transcription> {
-    const next = new Map<string, Transcription>();
-    if (last) {
-      for (const t of this.byId.values()) {
-        if (live.has(t.id) || !isOlder(t, last)) continue;
-        const again = reread.get(t.id);
-        if (again !== null) next.set(t.id, again ?? t);
+  /** Reads `pages` pages from the newest. When older rows remain, it also reads every active job. */
+  private async walk(pages: number): Promise<{ rows: Transcription[]; cursor: string | undefined }> {
+    const rows = new Map<string, Transcription>();
+    let cursor: string | undefined;
+    for (let i = 0; i < pages; i++) {
+      const page = await list({ limit: PAGE_SIZE, cursor });
+      for (const t of page.items) rows.set(t.id, t);
+      cursor = page.nextCursor;
+      if (!cursor) break;
+    }
+    if (cursor) {
+      for (const status of ACTIVE_STATUSES) {
+        let next: string | undefined;
+        do {
+          const page = await list({ limit: PAGE_SIZE, status, cursor: next });
+          for (const t of page.items) rows.set(t.id, t);
+          next = page.nextCursor;
+        } while (next);
       }
     }
-    for (const [id, t] of live) next.set(id, t);
-    return next;
+    return { rows: [...rows.values()], cursor };
   }
 
   private ensureStarted(): void {
@@ -273,20 +240,11 @@ class TranscriptionStore {
       ...this.snapshot,
       transcriptions,
       hasMore: this.olderCursor !== undefined,
-      loadingMore: this.loadingMoreGen !== undefined,
+      loadingMore: this.loadingMore,
       ...patch,
     };
     for (const listener of this.listeners) listener();
   }
-}
-
-/** True when `t` sorts after `last` in the API's default order (`createdAt` descending, then id descending). */
-function isOlder(t: Transcription, last: Transcription): boolean {
-  const milliseconds = Date.parse(t.createdAt) - Date.parse(last.createdAt);
-  if (milliseconds) return milliseconds < 0;
-  const fraction = (value: string) => (/\.(\d+)/.exec(value)?.[1] ?? "").padEnd(9, "0");
-  const order = fraction(t.createdAt).localeCompare(fraction(last.createdAt));
-  return order ? order < 0 : t.id < last.id;
 }
 
 export const transcriptionStore = new TranscriptionStore();

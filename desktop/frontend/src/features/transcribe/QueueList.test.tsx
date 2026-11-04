@@ -1,8 +1,19 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
-import { type Status, type Transcription } from "../../lib";
+import { HeliosError, type Status, type Transcription } from "../../lib";
 import { QueueList } from "./QueueList";
+
+const mocks = vi.hoisted(() => ({ deleteTranscription: vi.fn(), forget: vi.fn(), toast: vi.fn() }));
+vi.mock("../../lib", async (original) => ({
+  ...(await original<typeof import("../../lib")>()),
+  deleteTranscription: mocks.deleteTranscription,
+  transcriptionStore: { forget: mocks.forget },
+}));
+vi.mock("../../components", async (original) => ({
+  ...(await original<typeof import("../../components")>()),
+  useToast: () => ({ show: mocks.toast }),
+}));
 import { type QueueRowModel } from "./useTranscribeQueue";
 const row = (id: string, status: Status, createdAt: string, completedAt?: string): QueueRowModel => ({
   kind: "real", key: id, transcription: {
@@ -68,5 +79,52 @@ describe("queue reach and actions", () => {
     renderRows([row("done", "succeeded", "2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z")], { clearFinished });
     fireEvent.click(screen.getByRole("button", { name: "Clear completed" }));
     expect(clearFinished).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("queue with hidden rows", () => {
+  it("keeps the list and the load button when no row is visible but older rows exist", () => {
+    const onLoadMore = vi.fn();
+    renderRows([], { hasMore: true, hasHistory: true, onLoadMore, libraryCount: 100, libraryCountIsLowerBound: true });
+    expect(screen.getByText(/Queue is clear/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load older transcriptions" }));
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+  });
+  it("keeps the list when rows exist on the server but all are hidden", () => {
+    renderRows([], { hasHistory: true });
+    expect(screen.getByText(/Queue is clear/)).toBeInTheDocument();
+  });
+  it("renders nothing when no row exists anywhere", () => {
+    const { container } = render(<QueueList rows={[]} loading={false} connectionStale={false} isCanceling={() => false} isEntering={() => false}
+      cancel={vi.fn()} retry={vi.fn()} clearFinished={vi.fn()} libraryCount={0} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("removing a row", () => {
+  async function remove() {
+    renderRows([row("failed-one", "failed", "2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z")]);
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove" }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Remove" }));
+  }
+  beforeEach(() => vi.clearAllMocks());
+  it("forgets the row after a delete", async () => {
+    mocks.deleteTranscription.mockResolvedValueOnce(undefined);
+    await remove();
+    await vi.waitFor(() => expect(mocks.forget).toHaveBeenCalledWith("failed-one"));
+    expect(mocks.toast).not.toHaveBeenCalled();
+  });
+  it("forgets the row and shows no error when the server says not_found", async () => {
+    mocks.deleteTranscription.mockRejectedValueOnce(new HeliosError("not_found", "gone"));
+    await remove();
+    await vi.waitFor(() => expect(mocks.forget).toHaveBeenCalledWith("failed-one"));
+    expect(mocks.toast).not.toHaveBeenCalled();
+  });
+  it("keeps the row and shows an error for another failure", async () => {
+    mocks.deleteTranscription.mockRejectedValueOnce(new HeliosError("internal", "boom"));
+    await remove();
+    await vi.waitFor(() => expect(mocks.toast).toHaveBeenCalledTimes(1));
+    expect(mocks.forget).not.toHaveBeenCalled();
   });
 });

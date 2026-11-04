@@ -183,7 +183,12 @@ export function LibraryScreen({ openId, onOpenIdConsumed }: LibraryScreenProps) 
     const sameDialog = () => sameServer() && session === deleteSessionRef.current;
     setDeleting(true);
     try {
-      await deleteTranscription(id);
+      try {
+        await deleteTranscription(id);
+      } catch (err) {
+        // The server no longer has the item, so the deletion is done.
+        if (!(err instanceof HeliosError && err.code === "not_found")) throw err;
+      }
       if (!sameServer()) return;
       transcriptionStore.forget(id);
       // A canceled dialog still completed the deletion on this server.

@@ -145,12 +145,30 @@ func TestStoreLibraryListsFinishedItemsOnly(t *testing.T) {
 	}
 }
 
-// The Library query tests for SQL NULL only. This test proves that Finish
-// cannot store JSON null: pgx writes a nil *domain.Result as SQL NULL.
-func TestNilResultIsWrittenAsSQLNull(t *testing.T) {
+// The Library query tests for SQL NULL only. This test proves that the real
+// Finish path cannot store JSON null: a succeeded job with a nil result
+// leaves the column as SQL NULL, so the Library does not list it.
+func TestFinishWithNilResultStoresSQLNull(t *testing.T) {
 	requireDocker(t)
-	var result *domain.Result
-	var isNull bool
-	require.NoError(t, testPool.QueryRow(context.Background(), "SELECT $1::jsonb IS NULL", result).Scan(&isNull))
-	require.True(t, isNull)
+	truncateAll(t)
+	store := New(testPool)
+	ctx := context.Background()
+	id := newID()
+	require.NoError(t, store.Create(ctx, newTranscription(id, time.Now().UTC())))
+	claimed, err := store.Claim(ctx, "w1", time.Minute)
+	require.NoError(t, err)
+	require.NotNil(t, claimed)
+	require.NotNil(t, claimed.LeaseToken)
+	require.NoError(t, store.Finish(ctx, domain.FinishRequest{
+		ID: id, LeaseToken: *claimed.LeaseToken, Status: domain.StatusSucceeded, Result: nil,
+	}))
+
+	var isSQLNull bool
+	var jsonType *string
+	require.NoError(t, testPool.QueryRow(ctx, "SELECT result IS NULL, jsonb_typeof(result) FROM transcriptions WHERE id=$1", id).Scan(&isSQLNull, &jsonType))
+	require.True(t, isSQLNull)
+	require.Nil(t, jsonType)
+	page, err := store.List(ctx, ListFilter{Library: true})
+	require.NoError(t, err)
+	require.Empty(t, page.Items)
 }

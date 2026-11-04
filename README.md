@@ -190,8 +190,9 @@ filesystem volume, not a distributed object store — see `docs/ARCHITECTURE.md`
 
 The queue shows running jobs first, then pending jobs in submission order.
 It always loads every running and pending job, however many exist. It loads the
-newest 100 jobs at first. A "Load older transcriptions" button loads older jobs,
-100 at a time. The queue is the only list of failed and canceled jobs, so
+newest 100 jobs at first. A "Load older transcriptions" button loads 100 more
+jobs each time. Each poll reads again every page you loaded, so each row shown is
+as current as the server. The queue is the only list of failed and canceled jobs, so
 "Clear completed" hides succeeded rows only. Failed and canceled rows stay until
 you remove them.
 Library uses `library=true` to list only finished transcriptions: succeeded jobs

@@ -27,7 +27,10 @@ export function TranscribeScreen({ onOpenLibrary }: TranscribeScreenProps) {
   // first fetch we don't yet know whether this is a first run or not, and
   // defaulting to the docked bar over the full-surface takeover is the
   // safer guess either way.
-  const expanded = !queue.loading && queue.rows.length === 0;
+  // "Clear completed" can hide every visible row. The composer stays docked
+  // then, because rows still exist on the server.
+  const hasHistory = transcriptions.length > 0;
+  const expanded = !queue.loading && queue.rows.length === 0 && !hasHistory;
   // The count covers the loaded rows. While older rows exist, it is a lower bound.
   const libraryCount = transcriptions.filter(isLibraryEligible).length;
   const loadMore = () => {
@@ -58,6 +61,7 @@ export function TranscribeScreen({ onOpenLibrary }: TranscribeScreenProps) {
             onOpenLibrary={onOpenLibrary}
             libraryCount={libraryCount}
             libraryCountIsLowerBound={hasMore}
+            hasHistory={hasHistory}
             hasMore={hasMore}
             loadingMore={loadingMore}
             onLoadMore={loadMore}
