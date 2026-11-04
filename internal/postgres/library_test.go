@@ -31,70 +31,118 @@ func TestLibraryCursorValidation(t *testing.T) {
 	require.Equal(t, domain.ErrCodeInvalidInput, domain.CodeOf(err))
 }
 
-func TestStoreLibraryGlobalOrderAndAudioEligibility(t *testing.T) {
-	requireDocker(t)
-	truncateAll(t)
-	store := New(testPool)
-	ctx := context.Background()
-	at := time.Date(2026, 10, 1, 12, 0, 0, 123456000, time.UTC)
-	statuses := []domain.Status{domain.StatusPending, domain.StatusRunning, domain.StatusSucceeded, domain.StatusFailed, domain.StatusCanceled, domain.StatusRunning, domain.StatusPending, domain.StatusSucceeded}
-	ids := make([]string, len(statuses))
-	for i, status := range statuses {
-		id := newID()
-		ids[i] = id
-		tr := newTranscription(id, at.Add(time.Duration(i)*time.Microsecond))
-		require.NoError(t, store.Create(ctx, tr))
-		var completed *time.Time
-		if status.Terminal() && i != 4 {
-			value := at.Add(time.Duration(i) * time.Microsecond)
-			completed = &value
-		}
-		_, err := testPool.Exec(ctx, "UPDATE transcriptions SET status=$2, completed_at=$3 WHERE id=$1", id, status, completed)
-		require.NoError(t, err)
-	}
-	// Equal timestamps must still traverse every id once.
-	_, err := testPool.Exec(ctx, "UPDATE transcriptions SET created_at=$2 WHERE id=$1", ids[5], at.Add(time.Microsecond))
-	require.NoError(t, err)
-	for _, field := range []string{"source", "filename", "size"} {
-		tr := newTranscription(newID(), at)
-		if field == "source" {
-			tr.SourcePath = " "
-		}
-		if field == "filename" {
-			tr.Audio.Filename = " "
-		}
-		if field == "size" {
-			tr.Audio.SizeBytes = 0
-		}
-		require.NoError(t, store.Create(ctx, tr))
-	}
-	running := []string{ids[1], ids[5]}
-	if running[0] > running[1] {
-		running[0], running[1] = running[1], running[0]
-	}
-	want := append(running, ids[0], ids[6], ids[7], ids[4], ids[3], ids[2])
+// libraryIDs pages through the whole Library listing with the given page size
+// and returns the item ids in the order served.
+func libraryIDs(t *testing.T, store *Store, limit int) []string {
+	t.Helper()
 	var got []string
 	cursor := ""
 	for {
-		page, err := store.List(ctx, ListFilter{Library: true, Limit: 1, Cursor: cursor})
+		page, err := store.List(context.Background(), ListFilter{Library: true, Limit: limit, Cursor: cursor})
 		require.NoError(t, err)
 		for _, item := range page.Items {
 			got = append(got, item.ID)
 		}
 		if page.NextCursor == "" {
-			break
+			return got
 		}
 		cursor = page.NextCursor
-		require.LessOrEqual(t, len(got), len(want))
+		require.Less(t, len(got), 100, "cursor does not advance")
 	}
-	require.Equal(t, want, got)
-	page, err := store.List(ctx, ListFilter{Library: true, Status: domain.StatusPending})
+}
+
+func TestStoreLibraryListsFinishedItemsOnly(t *testing.T) {
+	requireDocker(t)
+	truncateAll(t)
+	store := New(testPool)
+	ctx := context.Background()
+	at := time.Date(2026, 10, 1, 12, 0, 0, 123456000, time.UTC)
+	const result = `{"text":"done","language":"en","durationSeconds":1,"model":"m","task":"transcribe","segments":[]}`
+
+	// create inserts one row and then forces its status, result and completion.
+	create := func(i int, status domain.Status, resultJSON *string, completed *time.Time) string {
+		id := newID()
+		require.NoError(t, store.Create(ctx, newTranscription(id, at.Add(time.Duration(i)*time.Microsecond))))
+		_, err := testPool.Exec(ctx, "UPDATE transcriptions SET status=$2, result=$3::jsonb, completed_at=$4 WHERE id=$1", id, status, resultJSON, completed)
+		require.NoError(t, err)
+		return id
+	}
+	done := func(i int) *time.Time {
+		v := at.Add(time.Duration(i) * time.Hour)
+		return &v
+	}
+	res := result
+	jsonNull := "null"
+
+	// Every status, each with a result where the schema allows one.
+	pending := create(0, domain.StatusPending, &res, nil)
+	running := create(1, domain.StatusRunning, &res, nil)
+	failed := create(2, domain.StatusFailed, &res, done(2))
+	canceled := create(3, domain.StatusCanceled, &res, done(3))
+	// A succeeded row without a usable result is not finished.
+	noResult := create(4, domain.StatusSucceeded, nil, done(4))
+	nullResult := create(5, domain.StatusSucceeded, &jsonNull, done(5))
+	// Succeeded rows with stored audio are finished. The last one has no
+	// completion time.
+	oldest := create(6, domain.StatusSucceeded, &res, done(6))
+	newest := create(8, domain.StatusSucceeded, &res, done(8))
+	middleA := create(7, domain.StatusSucceeded, &res, done(7))
+	middleB := create(7, domain.StatusSucceeded, &res, done(7))
+	fallback := create(9, domain.StatusSucceeded, &res, nil)
+	// Succeeded rows without stored audio are not listed.
+	for _, field := range []string{"source", "filename", "size"} {
+		tr := newTranscription(newID(), at)
+		switch field {
+		case "source":
+			tr.SourcePath = " "
+		case "filename":
+			tr.Audio.Filename = " "
+		case "size":
+			tr.Audio.SizeBytes = 0
+		}
+		require.NoError(t, store.Create(ctx, tr))
+		_, err := testPool.Exec(ctx, "UPDATE transcriptions SET status='succeeded', result=$2::jsonb, completed_at=now() WHERE id=$1", tr.ID, result)
+		require.NoError(t, err)
+	}
+	for _, id := range []string{pending, running, failed, canceled, noResult, nullResult} {
+		require.NotContains(t, libraryIDs(t, store, 100), id)
+	}
+
+	// Newest completion first. Equal completion times order by id ascending.
+	// The fallback row has no completion time, so it sorts by its creation
+	// time, which is older than every completion time above.
+	tied := []string{middleA, middleB}
+	if tied[0] > tied[1] {
+		tied[0], tied[1] = tied[1], tied[0]
+	}
+	want := []string{newest, tied[0], tied[1], oldest, fallback}
+	require.Equal(t, want, libraryIDs(t, store, 100))
+	// Cursors must traverse every id once at any page size.
+	require.Equal(t, want, libraryIDs(t, store, 1))
+	require.Equal(t, want, libraryIDs(t, store, 2))
+
+	// A status filter cannot widen the Library.
+	for _, status := range []domain.Status{domain.StatusPending, domain.StatusRunning, domain.StatusFailed, domain.StatusCanceled} {
+		page, err := store.List(ctx, ListFilter{Library: true, Status: status})
+		require.NoError(t, err)
+		require.Empty(t, page.Items, status)
+	}
+	page, err := store.List(ctx, ListFilter{Library: true, Status: domain.StatusSucceeded})
 	require.NoError(t, err)
-	require.Len(t, page.Items, 2)
-	require.Equal(t, ids[0], page.Items[0].ID)
-	require.Equal(t, ids[6], page.Items[1].ID)
-	defaultPage, err := store.List(ctx, ListFilter{})
+	require.Len(t, page.Items, len(want))
+
+	// A cursor from the removed active section restarts at the first row.
+	legacy := base64.RawURLEncoding.EncodeToString([]byte("library|0|" + at.Format(time.RFC3339Nano) + "|" + newID()))
+	page, err = store.List(ctx, ListFilter{Library: true, Cursor: legacy, Limit: 100})
 	require.NoError(t, err)
-	require.Len(t, defaultPage.Items, 11)
-	require.Equal(t, ids[7], defaultPage.Items[0].ID)
+	require.Len(t, page.Items, len(want))
+
+	// The default listing still returns every status, and single reads work.
+	defaultPage, err := store.List(ctx, ListFilter{Limit: 100})
+	require.NoError(t, err)
+	require.Len(t, defaultPage.Items, 14)
+	for _, id := range []string{pending, running, failed, canceled, noResult} {
+		_, err := store.Get(ctx, id)
+		require.NoError(t, err)
+	}
 }

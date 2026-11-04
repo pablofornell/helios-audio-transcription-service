@@ -1,7 +1,7 @@
 import { forwardRef, type MouseEvent } from "react";
-import { IconButton, Row, StatusPill } from "../../components";
+import { IconButton, Row } from "../../components";
 import { formatAbsolute, formatBytes, type Transcription } from "../../lib";
-import { buildLibraryMeta, libraryStatusSlot } from "./helpers";
+import { buildLibraryMeta } from "./helpers";
 
 export interface LibraryRowProps {
   transcription: Transcription;
@@ -37,8 +37,6 @@ export const LibraryRow = forwardRef<HTMLLIElement, LibraryRowProps>(function Li
   { transcription, selected, onSelect, onOpenDetail, onMoreClick, onContextMenu },
   ref,
 ) {
-  const status = libraryStatusSlot(transcription);
-  const railStatus = status ?? "succeeded";
   const titleId = `lib-row-title-${transcription.id}`;
   const descId = `lib-row-desc-${transcription.id}`;
   const title = transcription.audio.filename || transcription.id;
@@ -53,7 +51,7 @@ export const LibraryRow = forwardRef<HTMLLIElement, LibraryRowProps>(function Li
     <Row
       ref={ref}
       variant="library"
-      status={railStatus}
+      status="succeeded"
       selected={selected}
       thumb={
         <span aria-hidden="true" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: "100%", color: "var(--text-tertiary)" }}>
@@ -70,7 +68,6 @@ export const LibraryRow = forwardRef<HTMLLIElement, LibraryRowProps>(function Li
           {buildLibraryMeta(transcription)}
         </span>
       }
-      statusSlot={status ? <StatusPill status={status} errorCode={transcription.error?.code} dense /> : undefined}
       metric={<span className="num">{transcription.audio.sizeBytes > 0 ? formatBytes(transcription.audio.sizeBytes) : "—"}</span>}
       secondaryActions={
         <IconButton

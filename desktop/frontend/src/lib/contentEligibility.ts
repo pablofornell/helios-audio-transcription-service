@@ -8,3 +8,8 @@ export function hasStoredAudio(transcription: Transcription): boolean {
 export function hasDownloadableTranscript(transcription: Transcription): boolean {
   return transcription.status === "succeeded" && transcription.result != null;
 }
+
+/** The Library lists only finished items: a successful result and stored audio. The server applies the same rule. */
+export function isLibraryEligible(transcription: Transcription): boolean {
+  return hasStoredAudio(transcription) && hasDownloadableTranscript(transcription);
+}

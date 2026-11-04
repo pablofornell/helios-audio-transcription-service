@@ -1,8 +1,6 @@
 import { useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { Button, EmptyState, Menu, Segmented, Skeleton, TextField, type MenuItem } from "../../components";
+import { Button, EmptyState, Menu, Skeleton, TextField, type MenuItem } from "../../components";
 import { hasDownloadableTranscript } from "../../lib/contentEligibility";
-import { errorCopyFor } from "../transcribe/errorCopy";
-import { STATUS_FILTER_LABELS, type StatusFilterValue } from "./helpers";
 import { LibraryRow } from "./LibraryRow";
 import type { UseLibraryQueryResult } from "./useLibraryQuery";
 import styles from "./LibraryList.module.css";
@@ -11,29 +9,19 @@ export interface LibraryListProps extends UseLibraryQueryResult {
   selectedId: string | undefined;
   onSelect: (id: string) => void;
   onOpenDetail: (id: string) => void;
-  onRetry: (id: string) => void;
   onSaveAs: (id: string) => void;
   onDelete: (id: string) => void;
 }
 
-const STATUS_CHIPS: { value: StatusFilterValue | "all"; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "succeeded", label: STATUS_FILTER_LABELS.succeeded },
-  { value: "failed", label: STATUS_FILTER_LABELS.failed },
-  { value: "canceled", label: STATUS_FILTER_LABELS.canceled },
-];
-
 const SKELETON_ROWS = 6;
 
-/** Library's list column: search + status filter toolbar, the scrollable row list, and the shared "more actions" menu every row's `⋯` opens. */
+/** Library's list column: search toolbar, the scrollable row list, and the shared "more actions" menu every row's `⋯` opens. */
 export function LibraryList({
   items,
   loading,
   loadingMore,
   error,
   hasMore,
-  status,
-  setStatus,
   search,
   setSearch,
   loadMore,
@@ -41,7 +29,6 @@ export function LibraryList({
   selectedId,
   onSelect,
   onOpenDetail,
-  onRetry,
   onSaveAs,
   onDelete,
 }: LibraryListProps) {
@@ -69,9 +56,6 @@ export function LibraryList({
   const menuItem = menuFor ? items.find((i) => i.id === menuFor.id) : undefined;
   const menuItems: MenuItem[] = menuItem
     ? [
-        ...(menuItem.status === "failed" && errorCopyFor(menuItem.error?.code).retryable
-          ? [{ id: "retry", label: "Retry", onSelect: () => onRetry(menuItem.id) }]
-          : []),
         ...(hasDownloadableTranscript(menuItem) ? [{ id: "save", label: "Save transcript as…", onSelect: () => onSaveAs(menuItem.id) }] : []),
         { id: "delete", label: "Delete…", destructive: true, onSelect: () => onDelete(menuItem.id) },
       ]
@@ -89,12 +73,6 @@ export function LibraryList({
             aria-label="Search transcriptions"
           />
         </div>
-        <Segmented
-          label="Status"
-          value={status ?? "all"}
-          onChange={(v) => setStatus(v === "all" ? undefined : (v as StatusFilterValue))}
-          options={STATUS_CHIPS}
-        />
       </div>
 
       <div className={styles.listArea}>
@@ -121,9 +99,9 @@ export function LibraryList({
           <EmptyState
             variant="inline"
             body={
-              search.trim() || status
-                ? "Nothing matches the current filters."
-                : "No stored audio yet — uploaded files show up here."
+              search.trim()
+                ? "Nothing matches your search."
+                : "Nothing finished yet — completed transcriptions show up here."
             }
           />
         ) : (

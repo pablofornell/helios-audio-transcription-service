@@ -214,7 +214,6 @@ export function LibraryScreen({ openId }: LibraryScreenProps) {
           selectedId={selectedId}
           onSelect={setSelectedId}
           onOpenDetail={openDetail}
-          onRetry={handleRetry}
           onSaveAs={(id) => openSaveAs(id, "txt")}
           onDelete={openDelete}
         />

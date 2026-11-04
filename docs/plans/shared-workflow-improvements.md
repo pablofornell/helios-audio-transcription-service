@@ -9,7 +9,13 @@ download launch guards, and cleanup/fencing of asynchronous UI work.
 
 Accepted uploads have stored audio before transcription finishes. Pending,
 running, failed, and canceled jobs retain their source-audio download; transcript
-export requires a successful job with an actual result. No ZIP/bulk workflow or
+export requires a successful job with an actual result.
+
+> Update 2026-11-04: This decision is replaced for the Library list. The Library
+> now lists only finished jobs: status succeeded, with a result and stored audio.
+> Pending, running, failed, and canceled jobs appear only in the Transcribe queue.
+> Their source-audio download stays available from the queue row's "View in
+> Library" detail view. The single-item and audio endpoints do not change. No ZIP/bulk workflow or
 video extraction is introduced. Keep the existing elapsed-time display: this
 worker does not expose the progress percentage needed by the ingestion ETA.
 

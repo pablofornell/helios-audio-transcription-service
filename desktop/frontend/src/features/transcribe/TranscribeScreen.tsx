@@ -2,7 +2,7 @@ import { Composer } from "./Composer";
 import { QueueList } from "./QueueList";
 import { useTranscribeQueue } from "./useTranscribeQueue";
 import { useConnection, useTranscriptions } from "../../lib";
-import { hasStoredAudio } from "../../lib/contentEligibility";
+import { isLibraryEligible } from "../../lib/contentEligibility";
 import styles from "./TranscribeScreen.module.css";
 
 export interface TranscribeScreenProps {
@@ -26,7 +26,7 @@ export function TranscribeScreen({ onOpenLibrary }: TranscribeScreenProps) {
   // defaulting to the docked bar over the full-surface takeover is the
   // safer guess either way.
   const expanded = !queue.loading && queue.rows.length === 0;
-  const libraryCount = transcriptions.filter(hasStoredAudio).length;
+  const libraryCount = transcriptions.filter(isLibraryEligible).length;
   const connectionStale = connection.status === "reconnecting";
 
   return (

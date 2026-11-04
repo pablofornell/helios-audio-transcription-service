@@ -23,10 +23,11 @@ vi.mock("../../lib", async (importOriginal) => ({
 // only needs to prove which transcription it currently holds, and that
 // LibraryScreen's onClose reaches it.
 vi.mock("./DetailPanel", () => ({
-  DetailPanel: ({ transcription, onClose }: { transcription: { id: string; status: string }; onClose: () => void }) => (
+  DetailPanel: ({ transcription, onClose }: { transcription: { id: string; status: string; completedAt?: string }; onClose: () => void }) => (
     <div data-testid="detail-panel">
       <span data-testid="detail-id">{transcription.id}</span>
       <span data-testid="detail-status">{transcription.status}</span>
+      <span data-testid="detail-completed">{transcription.completedAt ?? ""}</span>
       <button onClick={onClose}>close</button>
     </div>
   ),
@@ -35,6 +36,7 @@ vi.mock("./DetailPanel", () => ({
 const row = (id: string) => ({
   id,
   status: "succeeded",
+  result: { text: "done" },
   options: { model: "large-v3-turbo-q5_0", language: "", task: "transcribe", wordTimestamps: false, initialPrompt: "", beamSize: 5, temperature: 0 },
   audio: { filename: `${id}.wav`, mediaType: "audio/wav", sizeBytes: 1, durationSeconds: 1, sampleRateHz: 16000, channels: 1, codec: "pcm_s16le" },
   attempts: 1,
@@ -76,15 +78,17 @@ describe("LibraryScreen — server settings changes", () => {
 
 
 describe("LibraryScreen detail refresh and request fencing", () => {
-  it("updates the open detail when a polled row completes", async () => {
+  // A running job is not in the library list. Its opened detail still updates.
+  it("updates the open detail of an unfinished job when it completes", async () => {
     vi.useFakeTimers();
     const active = { ...row("active"), status: "running" };
     get.mockResolvedValue(active);
-    list.mockResolvedValueOnce({ items: [active] });
+    list.mockResolvedValue({ items: [] });
     render(<LibraryScreen openId="active" />);
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(screen.getByTestId("detail-status")).toHaveTextContent("running");
-    list.mockResolvedValue({ items: [{ ...row("active"), result: { text: "finished" } }] });
+    expect(screen.queryByText("active.wav")).not.toBeInTheDocument();
+    get.mockResolvedValue({ ...row("active"), result: { text: "finished" } });
     await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
     expect(screen.getByTestId("detail-status")).toHaveTextContent("succeeded");
   });
@@ -115,15 +119,16 @@ describe("LibraryScreen detail refresh and request fencing", () => {
 
 it("refreshes selected detail even when filename search hides its loaded row", async () => {
   vi.useFakeTimers();
-  const active = { ...row("active"), status: "running" };
-  get.mockResolvedValue(active);
-  list.mockResolvedValueOnce({ items: [active] });
+  const finished = row("active");
+  get.mockResolvedValue(finished);
+  list.mockResolvedValueOnce({ items: [finished] });
   render(<LibraryScreen openId="active" />);
   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
   fireEvent.change(screen.getByRole("textbox", { name: "Search transcriptions" }), { target: { value: "other-file" } });
-  list.mockResolvedValue({ items: [{ ...row("active"), result: { text: "finished" } }] });
-  await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
-  expect(screen.getByTestId("detail-status")).toHaveTextContent("succeeded");
+  expect(screen.queryByText("active.wav")).not.toBeInTheDocument();
+  list.mockResolvedValue({ items: [{ ...finished, completedAt: "2026-09-21T20:00:00Z" }] });
+  await act(async () => { await vi.advanceTimersByTimeAsync(10_100); });
+  expect(screen.getByTestId("detail-completed")).toHaveTextContent("2026-09-21T20:00:00Z");
 });
 
 it("polls open detail independently when its status is excluded from loaded rows", async () => {
@@ -144,4 +149,34 @@ it("opens the handed-off detail after StrictMode replays mount effects", async (
   get.mockResolvedValue(row("active"));
   render(<StrictMode><LibraryScreen openId="active" /></StrictMode>);
   await waitFor(() => expect(screen.getByTestId("detail-id")).toHaveTextContent("active"));
+});
+
+describe("LibraryScreen — finished items only", () => {
+  it("lists finished items and hides every other status", async () => {
+    const others = ["pending", "running", "failed", "canceled"].map((status) => ({ ...row(status), status, result: undefined }));
+    list.mockResolvedValue({ items: [row("done"), ...others] });
+    render(<LibraryScreen />);
+    await waitFor(() => expect(screen.getByText("done.wav")).toBeInTheDocument());
+    for (const status of ["pending", "running", "failed", "canceled"]) expect(screen.queryByText(`${status}.wav`)).not.toBeInTheDocument();
+  });
+
+  it("has no status filter", async () => {
+    list.mockResolvedValue({ items: [row("done")] });
+    render(<LibraryScreen />);
+    await waitFor(() => expect(screen.getByText("done.wav")).toBeInTheDocument());
+    expect(screen.queryByRole("radiogroup", { name: "Status" })).not.toBeInTheDocument();
+    for (const label of ["Complete", "Failed", "Canceled"]) expect(screen.queryByText(label)).not.toBeInTheDocument();
+  });
+
+  it("removes an item when a poll shows it is no longer finished, and adds a new item that succeeded", async () => {
+    vi.useFakeTimers();
+    list.mockResolvedValueOnce({ items: [row("old")] });
+    render(<LibraryScreen />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText("old.wav")).toBeInTheDocument();
+    list.mockResolvedValue({ items: [{ ...row("fresh"), completedAt: "2026-09-21T20:00:00Z" }, { ...row("old"), status: "pending", result: undefined }] });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_100); });
+    expect(screen.getByText("fresh.wav")).toBeInTheDocument();
+    expect(screen.queryByText("old.wav")).not.toBeInTheDocument();
+  });
 });

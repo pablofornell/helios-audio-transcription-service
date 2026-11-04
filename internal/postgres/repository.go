@@ -94,9 +94,10 @@ func (s *Store) Get(ctx context.Context, id string) (*domain.Transcription, erro
 	return t, nil
 }
 
-// List defaults to newest-created keyset pagination. Library mode filters
-// stored audio and orders running/pending FIFO before recent completions,
-// using a separate rank/time/id cursor with full timestamp precision.
+// List defaults to newest-created keyset pagination. Library mode returns
+// only finished items: status succeeded, with a stored result and stored
+// audio. It orders them by completion time, newest first, using a separate
+// rank/time/id cursor with full timestamp precision.
 func (s *Store) List(ctx context.Context, f ListFilter) (Page, error) {
 	limit := f.Limit
 	switch {
@@ -131,20 +132,20 @@ func (s *Store) List(ctx context.Context, f ListFilter) (Page, error) {
 		args = append(args, string(f.Status))
 		query += fmt.Sprintf(" AND status = $%d", len(args))
 	}
-	rankSQL := "CASE status WHEN 'running' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END"
-	timeSQL := "CASE WHEN status IN ('running', 'pending') THEN created_at ELSE COALESCE(completed_at, created_at) END"
+	// Library rows are all finished, so they all have rank 2. The cursor keeps
+	// its rank field so that cursors from earlier versions still decode.
+	const libraryTimeSQL = "COALESCE(completed_at, created_at)"
 	if f.Library {
+		query += " AND status = 'succeeded' AND result IS NOT NULL AND result <> 'null'::jsonb"
 		query += " AND btrim(source_path) <> '' AND btrim(audio->>'filename') <> '' AND (audio->>'sizeBytes')::bigint > 0"
 	}
-	if hasCursor && f.Library {
-		args = append(args, cursorRank, cursorCreatedAt, cursorID)
-		r, at, id := len(args)-2, len(args)-1, len(args)
-		op := ">"
-		if cursorRank == 2 {
-			op = "<"
-		}
-		query += fmt.Sprintf(" AND ((%s) > $%d OR ((%s) = $%d AND ((%s) %s $%d OR ((%s) = $%d AND id > $%d::uuid))))", rankSQL, r, rankSQL, r, timeSQL, op, at, timeSQL, at, id)
-	} else if hasCursor {
+	// A cursor with a rank below 2 points into the old active section. That
+	// section no longer exists, so such a cursor restarts at the first row.
+	if hasCursor && f.Library && cursorRank == 2 {
+		args = append(args, cursorCreatedAt, cursorID)
+		at, id := len(args)-1, len(args)
+		query += fmt.Sprintf(" AND (%s < $%d OR (%s = $%d AND id > $%d::uuid))", libraryTimeSQL, at, libraryTimeSQL, at, id)
+	} else if hasCursor && !f.Library {
 		args = append(args, cursorCreatedAt, cursorID)
 		query += fmt.Sprintf(" AND (created_at, id) < ($%d, $%d)", len(args)-1, len(args))
 	}
@@ -153,7 +154,7 @@ func (s *Store) List(ctx context.Context, f ListFilter) (Page, error) {
 	// empty final page.
 	args = append(args, limit+1)
 	if f.Library {
-		query += fmt.Sprintf(" ORDER BY (%s) ASC, CASE WHEN status IN ('running', 'pending') THEN created_at END ASC, CASE WHEN status NOT IN ('running', 'pending') THEN COALESCE(completed_at, created_at) END DESC, id ASC LIMIT $%d", rankSQL, len(args))
+		query += fmt.Sprintf(" ORDER BY %s DESC, id ASC LIMIT $%d", libraryTimeSQL, len(args))
 	} else {
 		query += fmt.Sprintf(" ORDER BY created_at DESC, id DESC LIMIT $%d", len(args))
 	}

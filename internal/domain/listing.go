@@ -15,7 +15,8 @@ package domain
 // ListFilter narrows and pages a listing of transcriptions. The zero value
 // is a valid request for the first page of everything.
 type ListFilter struct {
-	// Library includes stored audio only, with active FIFO before recent completions.
+	// Library includes only finished items: status succeeded, with a stored
+	// result and stored audio. They are newest-completed first.
 	// Its cursors cannot be used with the default newest-created listing.
 	Library bool
 	// Status, when non-empty, restricts the listing to one status.

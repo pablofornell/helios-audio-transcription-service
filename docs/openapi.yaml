@@ -165,17 +165,18 @@ paths:
       summary: List transcriptions, most recently created first.
       description: >
         The default ordering and cursor format remain unchanged. With library=true,
-        only rows with stored source audio are included (positive sizeBytes, nonempty
-        filename and source path). Running jobs precede pending jobs, each oldest-created
-        first; terminal jobs follow, most recently completed first, falling back to
-        createdAt. IDs ascending break equal timestamps. Timestamp precision is
-        preserved in keyset cursors. Library and default cursors cannot be mixed.
-        Status filters apply in either mode. Audio remains available across statuses;
-        transcript export requires succeeded and a nonnull result.
+        only finished rows are included: status succeeded, a nonnull result, and stored
+        source audio (positive sizeBytes, nonempty filename and source path). Pending,
+        running, failed and canceled jobs are never included. Rows are ordered most
+        recently completed first, falling back to createdAt. IDs ascending break equal
+        timestamps. Timestamp precision is preserved in keyset cursors. Library and
+        default cursors cannot be mixed. Status filters apply in either mode. A status
+        other than succeeded returns an empty Library page. The single-item and audio
+        endpoints still serve every status.
       parameters:
         - name: library
           in: query
-          description: Opt into the stored-audio Library ordering. Only true or false is accepted.
+          description: Opt into the finished-items-only Library listing. Only true or false is accepted.
           schema:
             type: boolean
             default: false
