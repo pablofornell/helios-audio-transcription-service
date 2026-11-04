@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ListPage, Transcription } from "./types";
+import type { ListFilter, ListPage, Transcription } from "./types";
 
 /*
  * `transcriptionStore` is a module-level singleton (see `./store.ts`'s own
@@ -15,10 +15,10 @@ import type { ListPage, Transcription } from "./types";
  * incidentally.
  */
 
-let listImpl: () => Promise<ListPage>;
+let listImpl: (filter: ListFilter) => Promise<ListPage>;
 
 vi.mock("./api", () => ({
-  list: () => listImpl(),
+  list: (filter: ListFilter) => listImpl(filter),
 }));
 
 function makeTranscription(overrides: Partial<Transcription> = {}): Transcription {
@@ -234,6 +234,224 @@ describe("transcriptionStore — poll cadence", () => {
     await vi.advanceTimersByTimeAsync(100);
     expect(call).toBe(3);
 
+    unsubscribe();
+  });
+});
+
+/**
+ * A fake server like the real one: rows are newest first, and a cursor holds
+ * the position (`createdAt` and id) of the last row served. A cursor still
+ * works after that row is deleted. Tests change `server.rows` at any time.
+ */
+function fakeServer(initial: Transcription[]) {
+  const server = {
+    rows: initial,
+    requests: [] as ListFilter[],
+    gate: undefined as Promise<void> | undefined,
+  };
+  listImpl = async (filter) => {
+    server.requests.push(filter);
+    if (server.gate) await server.gate;
+    const matching = server.rows.filter((t) => !filter.status || t.status === filter.status);
+    let start = 0;
+    if (filter.cursor) {
+      const [createdAt, id] = filter.cursor.split("|");
+      start = matching.findIndex((t) => t.createdAt < createdAt || (t.createdAt === createdAt && t.id < id));
+      if (start < 0) start = matching.length;
+    }
+    const limit = Math.min(filter.limit ?? 20, 100);
+    const items = matching.slice(start, start + limit);
+    const last = items.at(-1);
+    const more = start + limit < matching.length;
+    return { items, nextCursor: more && last ? `${last.createdAt}|${last.id}` : undefined };
+  };
+  return server;
+}
+
+/** `count` rows, newest first. `id` is `t-0` for the newest. */
+function manyRows(count: number, status: (index: number) => Transcription["status"]): Transcription[] {
+  return Array.from({ length: count }, (_, i) =>
+    makeTranscription({ id: `t-${i}`, status: status(i), createdAt: new Date(Date.UTC(2024, 0, 1) - i * 1000).toISOString() }),
+  );
+}
+
+const newest = (i: number) => new Date(Date.UTC(2024, 0, 1) + i * 1000).toISOString();
+
+async function started() {
+  const { transcriptionStore } = await import("./store");
+  const unsubscribe = transcriptionStore.subscribe(() => {});
+  await vi.waitFor(() => expect(transcriptionStore.getSnapshot().loading).toBe(false));
+  const ids = () => transcriptionStore.getSnapshot().transcriptions.map((t) => t.id);
+  const status = (id: string) => transcriptionStore.getSnapshot().transcriptions.find((t) => t.id === id)?.status;
+  return { transcriptionStore, unsubscribe, ids, status };
+}
+
+describe("transcriptionStore — reach beyond one page", () => {
+  it("costs one request per poll when one page holds every row", async () => {
+    const server = fakeServer(manyRows(100, () => "succeeded"));
+    const { transcriptionStore, unsubscribe, ids } = await started();
+    expect(ids()).toHaveLength(100);
+    expect(server.requests).toEqual([{ limit: 100 }]);
+    expect(transcriptionStore.getSnapshot().hasMore).toBe(false);
+    unsubscribe();
+  });
+
+  it("loads every active job when more than 100 rows exist, then older rows on request", async () => {
+    // 250 rows. The 3 oldest are active, so the newest page cannot hold them.
+    const server = fakeServer(manyRows(250, (i) => (i === 249 ? "running" : i >= 247 ? "pending" : i === 150 ? "failed" : "succeeded")));
+    const { transcriptionStore, unsubscribe, ids } = await started();
+    expect(server.requests.every((r) => (r.limit ?? 0) <= 100)).toBe(true);
+    expect(ids()).toHaveLength(103);
+    for (const id of ["t-249", "t-248", "t-247"]) expect(ids()).toContain(id);
+    expect(transcriptionStore.getSnapshot().hasMore).toBe(true);
+
+    // The failed row is older than the newest page: it needs "load more".
+    expect(ids()).not.toContain("t-150");
+    await transcriptionStore.loadMore();
+    expect(ids()).toContain("t-150");
+    expect(ids()).toHaveLength(203);
+    expect(transcriptionStore.getSnapshot().hasMore).toBe(true);
+    await transcriptionStore.loadMore();
+    expect(ids()).toHaveLength(250);
+    expect(transcriptionStore.getSnapshot().hasMore).toBe(false);
+    unsubscribe();
+  });
+
+  it("walks every loaded page on each poll, so a new row pushes the oldest loaded row off the cache", async () => {
+    const server = fakeServer(manyRows(150, () => "succeeded"));
+    const { transcriptionStore, unsubscribe, ids } = await started();
+    await transcriptionStore.loadMore();
+    expect(ids()).toHaveLength(150);
+
+    server.rows = [makeTranscription({ id: "new", status: "pending", createdAt: newest(1) }), ...server.rows];
+    transcriptionStore.refreshNow();
+    await vi.waitFor(() => expect(ids()).toContain("new"));
+    // Two pages are loaded, so the cache holds 200 rows or every row: here 151.
+    expect(ids()).toHaveLength(151);
+    expect(ids()).toContain("t-149");
+    unsubscribe();
+  });
+
+  it("drops a row that falls off the walked pages, and loads it again with load more", async () => {
+    const server = fakeServer(manyRows(150, () => "succeeded"));
+    const { transcriptionStore, unsubscribe, ids } = await started();
+    expect(ids()).toHaveLength(100);
+    server.rows = [makeTranscription({ id: "new", status: "succeeded", createdAt: newest(1) }), ...server.rows];
+    transcriptionStore.refreshNow();
+    await vi.waitFor(() => expect(ids()).toContain("new"));
+    expect(ids()).toHaveLength(100);
+    expect(ids()).not.toContain("t-99");
+    await transcriptionStore.loadMore();
+    expect(ids()).toContain("t-99");
+    expect(ids()).toHaveLength(151);
+    unsubscribe();
+  });
+
+  it("removes an older row the server deleted", async () => {
+    // Retention deletes the oldest rows first.
+    const server = fakeServer(manyRows(150, () => "succeeded"));
+    const { transcriptionStore, unsubscribe, ids } = await started();
+    await transcriptionStore.loadMore();
+    expect(ids()).toContain("t-149");
+    server.rows = server.rows.filter((t) => t.id !== "t-149" && t.id !== "t-120");
+    transcriptionStore.refreshNow();
+    await vi.waitFor(() => expect(ids()).toHaveLength(148));
+    expect(ids()).not.toContain("t-149");
+    expect(ids()).not.toContain("t-120");
+    unsubscribe();
+  });
+
+  it("shows the new status of an older row that changed between polls", async () => {
+    // t-140 failed, then the user retried it and it succeeded.
+    const server = fakeServer(manyRows(150, (i) => (i === 140 ? "failed" : "succeeded")));
+    const { transcriptionStore, unsubscribe, status } = await started();
+    await transcriptionStore.loadMore();
+    expect(status("t-140")).toBe("failed");
+    server.rows = server.rows.map((t) => (t.id === "t-140" ? { ...t, status: "succeeded" as const } : t));
+    transcriptionStore.refreshNow();
+    await vi.waitFor(() => expect(status("t-140")).toBe("succeeded"));
+    unsubscribe();
+  });
+
+  it("keeps the rows of a load more that runs together with a poll", async () => {
+    const server = fakeServer(manyRows(250, () => "succeeded"));
+    const { transcriptionStore, unsubscribe, ids } = await started();
+    let open!: () => void;
+    server.gate = new Promise<void>((resolve) => { open = resolve; });
+    // A poll starts, then load more starts before the poll ends.
+    transcriptionStore.refreshNow();
+    const loading = transcriptionStore.loadMore();
+    expect(transcriptionStore.getSnapshot().loadingMore).toBe(true);
+    server.gate = undefined;
+    open();
+    await loading;
+    await vi.waitFor(() => expect(ids()).toHaveLength(200));
+    expect(transcriptionStore.getSnapshot().loadingMore).toBe(false);
+    expect(transcriptionStore.getSnapshot().hasMore).toBe(true);
+    // The poll that ends last must not remove the loaded page.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(ids()).toHaveLength(200);
+    unsubscribe();
+  });
+
+  it("discards a walk that a server change made obsolete", async () => {
+    const old = fakeServer(manyRows(250, () => "succeeded"));
+    const { transcriptionStore, unsubscribe, ids } = await started();
+    let open!: () => void;
+    old.gate = new Promise<void>((resolve) => { open = resolve; });
+    // This load more walks 2 pages of the old server and waits at the gate.
+    const loading = transcriptionStore.loadMore();
+    fakeServer([makeTranscription({ id: "other", status: "succeeded" })]);
+    transcriptionStore.resetForServerChange();
+    await vi.waitFor(() => expect(ids()).toEqual(["other"]));
+    open();
+    await loading;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ids()).toEqual(["other"]);
+    expect(transcriptionStore.getSnapshot().hasMore).toBe(false);
+    expect(transcriptionStore.getSnapshot().loadingMore).toBe(false);
+    unsubscribe();
+  });
+
+  it("restores the page count when a load more fails", async () => {
+    const server = fakeServer(manyRows(250, () => "succeeded"));
+    const { transcriptionStore, unsubscribe, ids } = await started();
+    const working = listImpl;
+    listImpl = () => Promise.reject(new Error("offline"));
+    await expect(transcriptionStore.loadMore()).rejects.toThrow("offline");
+    expect(transcriptionStore.getSnapshot().loadingMore).toBe(false);
+    listImpl = working;
+    transcriptionStore.refreshNow();
+    await vi.waitFor(() => expect(server.requests.length).toBeGreaterThan(1));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ids()).toHaveLength(100);
+    unsubscribe();
+  });
+
+  it("forget() removes a row at once and no earlier walk brings it back", async () => {
+    const server = fakeServer(manyRows(3, () => "failed"));
+    const { transcriptionStore, unsubscribe, ids } = await started();
+    let open!: () => void;
+    server.gate = new Promise<void>((resolve) => { open = resolve; });
+    transcriptionStore.refreshNow(); // a walk that still holds the row
+    server.rows = server.rows.filter((t) => t.id !== "t-1");
+    transcriptionStore.forget("t-1");
+    expect(ids()).toEqual(["t-0", "t-2"]);
+    server.gate = undefined;
+    open();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ids()).toEqual(["t-0", "t-2"]);
+    unsubscribe();
+  });
+
+  it("forgets rows and cursors of the old server on a server change", async () => {
+    fakeServer(manyRows(150, () => "succeeded"));
+    const { transcriptionStore, unsubscribe, ids } = await started();
+    await transcriptionStore.loadMore();
+    fakeServer([makeTranscription({ id: "other", status: "succeeded" })]);
+    transcriptionStore.resetForServerChange();
+    await vi.waitFor(() => expect(ids()).toEqual(["other"]));
+    expect(transcriptionStore.getSnapshot().hasMore).toBe(false);
     unsubscribe();
   });
 });

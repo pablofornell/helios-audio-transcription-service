@@ -3,9 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bumpServerSettingsVersion, type Options, type Transcription } from "../../lib";
 import { useTranscribeQueue } from "./useTranscribeQueue";
 const mocks = vi.hoisted(() => ({ submit: vi.fn(), cancel: vi.fn(), retry: vi.fn(), refresh: vi.fn(), toast: vi.fn() }));
+const store = vi.hoisted(() => ({ transcriptions: [] as unknown[] }));
 vi.mock("../../lib", async (original) => ({
   ...(await original<typeof import("../../lib")>()), submit: mocks.submit, cancel: mocks.cancel, retry: mocks.retry,
-  useTranscriptions: () => ({ transcriptions: [], loading: false }), transcriptionStore: { refreshNow: mocks.refresh },
+  useTranscriptions: () => ({ transcriptions: store.transcriptions, loading: false }), transcriptionStore: { refreshNow: mocks.refresh },
 }));
 vi.mock("../../components", () => ({ useToast: () => ({ show: mocks.toast }) }));
 const options: Options = { model: "", language: "", task: "transcribe", wordTimestamps: false, initialPrompt: "", beamSize: 5, temperature: 0 };
@@ -16,7 +17,7 @@ function deferred<T>() {
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
-beforeEach(() => { vi.useFakeTimers(); vi.clearAllMocks(); });
+beforeEach(() => { vi.useFakeTimers(); vi.clearAllMocks(); store.transcriptions = []; });
 afterEach(() => vi.useRealTimers());
 describe("queue lifecycle", () => {
   it("clears entrance timers on unmount", () => {
@@ -85,5 +86,16 @@ describe("queue lifecycle", () => {
     await act(async () => { old.resolve({ id: "same-id" } as Transcription); await vi.advanceTimersByTimeAsync(0); });
     act(() => result.current.retry("same-id"));
     expect(mocks.retry).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("clear completed", () => {
+  it("hides succeeded rows and keeps failed, canceled, pending and running rows", () => {
+    const at = (id: string, status: string) => ({ id, status, createdAt: "2026-10-01T00:00:00Z" });
+    store.transcriptions = ["succeeded", "failed", "canceled", "pending", "running"].map((status) => at(status, status));
+    const { result } = renderHook(useTranscribeQueue);
+    expect(result.current.rows).toHaveLength(5);
+    act(() => result.current.clearFinished());
+    expect(result.current.rows.map((row) => row.key).sort()).toEqual(["canceled", "failed", "pending", "running"]);
   });
 });

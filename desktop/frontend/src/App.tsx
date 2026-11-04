@@ -26,9 +26,10 @@ function App() {
   const connection = useConnection();
 
   // A one-shot hand-off, not shared state: a queue row asks the Library to
-  // open a specific transcription, and the Library clears the intent by
-  // simply not reading it again. Keeping it here rather than in a store
-  // means the two screens never need to know about each other.
+  // open a specific transcription, and the Library reports when it has taken
+  // the id, so this shell clears it. Without that, every later visit to the
+  // Library would open the same item again. Keeping it here rather than in a
+  // store means the two screens never need to know about each other.
   const [pendingLibraryId, setPendingLibraryId] = useState<string | undefined>(undefined);
   const [screen, setScreen] = useState<ScreenId>("transcribe");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -105,7 +106,7 @@ function App() {
                   }}
                 />
               ) : (
-                <LibraryScreen openId={pendingLibraryId} />
+                <LibraryScreen openId={pendingLibraryId} onOpenIdConsumed={() => setPendingLibraryId(undefined)} />
               )}
             </div>
           </div>

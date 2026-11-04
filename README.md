@@ -189,13 +189,21 @@ filesystem volume, not a distributed object store — see `docs/ARCHITECTURE.md`
 ## Shared queue, catalogue, and download behavior
 
 The queue shows running jobs first, then pending jobs in submission order.
-Library uses `library=true` to list stored source audio in that same active-first
-order, followed by terminal jobs ordered by completion time. Its cursor follows
-that ordering, including submillisecond timestamps. Loaded pages and open details
+It always loads every running and pending job, however many exist. It loads the
+newest 100 jobs at first. A "Load older transcriptions" button loads 100 more
+jobs each time. Each poll reads again every page you loaded, so each row shown is
+as current as the server. The queue is the only list of failed and canceled jobs, so
+"Clear completed" hides succeeded rows only. Failed and canceled rows stay until
+you remove them.
+Library uses `library=true` to list only finished transcriptions: succeeded jobs
+with a result and stored source audio, ordered by completion time. Pending,
+running, failed, and canceled jobs stay in the queue. Its cursor follows that
+ordering, including submillisecond timestamps. Loaded pages and open details
 continue updating while you browse or search.
 
 Uploaded audio remains downloadable for pending, running, failed, and canceled
-transcriptions. Transcript downloads require a successful job with a result.
+transcriptions. Use "View in Library" on a queue row to open its detail.
+Transcript downloads require a successful job with a result.
 Individual audio and transcript downloads stream through the browser's download
 manager, with brief duplicate-click protection per URL; separate files can start
 independently. The existing elapsed processing timer remains in use because this

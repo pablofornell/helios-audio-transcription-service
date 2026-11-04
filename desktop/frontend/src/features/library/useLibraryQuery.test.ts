@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ACTIVE_POLL_MS, bumpServerSettingsVersion, IDLE_POLL_MS } from "../../lib";
+import { bumpServerSettingsVersion, IDLE_POLL_MS } from "../../lib";
 import { useLibraryQuery } from "./useLibraryQuery";
 
 const { list, get } = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn() }));
@@ -14,6 +14,7 @@ vi.mock("../../lib", async (importOriginal) => ({
 const row = (id: string, status = "succeeded") => ({
   id,
   status,
+  result: status === "succeeded" ? { text: "done" } : undefined,
   options: { model: "large-v3-turbo-q5_0", language: "", task: "transcribe", wordTimestamps: false, initialPrompt: "", beamSize: 5, temperature: 0 },
   audio: { filename: `${id}.wav`, mediaType: "audio/wav", sizeBytes: 1, durationSeconds: 1, sampleRateHz: 16000, channels: 1, codec: "pcm_s16le" },
   attempts: 1,
@@ -60,34 +61,71 @@ describe("useLibraryQuery background refresh", () => {
     expect(result.current.items.map((i) => i.id)).toEqual(["b", "a"]);
   });
 
-  // A list with work in flight must refresh quickly, not on the idle beat.
-  it("polls faster while a job is pending or running", async () => {
-    list.mockResolvedValue(page([row("a", "running")]));
+  // Only finished items belong in the library. A row that the server should
+  // not send is dropped by the client as well.
+  it("drops queued, running, failed and canceled rows from fetch and load more", async () => {
+    const unfinished = ["pending", "running", "failed", "canceled"].map((status) => row(status, status));
+    list.mockResolvedValueOnce(page([row("a"), ...unfinished], "cursor-1"));
     const { result } = renderHook(() => useLibraryQuery());
     await flush();
-    expect(result.current.items).toHaveLength(1);
-
-    const callsAfterMount = list.mock.calls.length;
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(ACTIVE_POLL_MS + 50);
-    });
-    expect(list.mock.calls.length).toBeGreaterThan(callsAfterMount);
+    expect(result.current.items.map((item) => item.id)).toEqual(["a"]);
+    list.mockResolvedValueOnce(page([row("b"), ...unfinished]));
+    act(() => result.current.loadMore());
+    await flush();
+    expect(result.current.items.map((item) => item.id).sort()).toEqual(["a", "b"]);
   });
 
-  it("keeps loaded pages live when an older active row completes", async () => {
+  it("drops a succeeded row without a result", async () => {
+    list.mockResolvedValueOnce(page([{ ...row("a"), result: undefined }, row("b")]));
+    const { result } = renderHook(() => useLibraryQuery());
+    await flush();
+    expect(result.current.items.map((item) => item.id)).toEqual(["b"]);
+  });
+
+  // An update (poll or retry) can make a loaded item unfinished. It must leave the list.
+  it("drops a loaded item when a poll shows it is no longer finished", async () => {
+    list.mockResolvedValueOnce(page([row("b"), row("a")]));
+    const { result } = renderHook(() => useLibraryQuery());
+    await flush();
+    expect(result.current.items).toHaveLength(2);
+    list.mockResolvedValueOnce(page([row("b", "running"), row("a")]));
+    await flush(IDLE_POLL_MS + 50);
+    expect(result.current.items.map((item) => item.id)).toEqual(["a"]);
+  });
+
+  it("drops a loaded item when updateItem makes it unfinished", async () => {
+    list.mockResolvedValueOnce(page([row("a"), row("b")]));
+    const { result } = renderHook(() => useLibraryQuery());
+    await flush();
+    act(() => result.current.updateItem("a", { status: "pending", result: undefined }));
+    expect(result.current.items.map((item) => item.id)).toEqual(["b"]);
+  });
+
+  it("shows a new item when it succeeds", async () => {
+    list.mockResolvedValueOnce(page([row("a")]));
+    const { result } = renderHook(() => useLibraryQuery());
+    await flush();
+    list.mockResolvedValueOnce(page([row("a")]));
+    await flush(IDLE_POLL_MS + 50);
+    expect(result.current.items.map((item) => item.id)).toEqual(["a"]);
+    list.mockResolvedValueOnce(page([{ ...row("new"), completedAt: "2026-09-21T20:00:00Z" }, row("a")]));
+    await flush(IDLE_POLL_MS + 50);
+    expect(result.current.items.map((item) => item.id)).toEqual(["new", "a"]);
+  });
+
+  it("keeps loaded pages live when an older row stops being finished", async () => {
     list.mockResolvedValueOnce(page([row("a")], "cursor-1"));
     const { result } = renderHook(() => useLibraryQuery());
     await flush();
-    expect(list).toHaveBeenCalledWith({ library: true, limit: 40, status: undefined });
-    list.mockResolvedValueOnce(page([row("b", "running")]));
+    expect(list).toHaveBeenCalledWith({ library: true, limit: 40 });
+    list.mockResolvedValueOnce(page([row("b"), row("c")]));
     act(() => result.current.loadMore());
     await flush();
     list.mockResolvedValue(page([row("a")]));
-    get.mockResolvedValue({ ...row("b"), result: { text: "finished" }, completedAt: "2026-09-21T20:00:00Z" });
-    await flush(ACTIVE_POLL_MS + 50);
+    get.mockImplementation(async (id: string) => id === "b" ? { ...row("b", "pending") } : { ...row("c"), completedAt: "2026-09-21T20:00:00Z" });
+    await flush(IDLE_POLL_MS + 50);
     expect(get).toHaveBeenCalledWith("b");
-    expect(result.current.items.map((item) => item.id)).toEqual(["b", "a"]);
-    expect(result.current.items[0].result).toEqual({ text: "finished" });
+    expect(result.current.items.map((item) => item.id)).toEqual(["c", "a"]);
     expect(result.current.loadingMore).toBe(false);
   });
 
@@ -108,7 +146,7 @@ describe("useLibraryQuery background refresh", () => {
     expect(result.current.loadingMore).toBe(false);
   });
 
-  it("clears pending paging when status changes and ignores its late response", async () => {
+  it("clears pending paging when the server changes and ignores its late response", async () => {
     list.mockResolvedValueOnce(page([row("a")], "tail"));
     const { result } = renderHook(() => useLibraryQuery());
     await flush();
@@ -116,12 +154,12 @@ describe("useLibraryQuery background refresh", () => {
     list.mockImplementationOnce(() => new Promise((resolve) => { finishPage = resolve; }));
     act(() => result.current.loadMore());
     expect(result.current.loadingMore).toBe(true);
-    list.mockResolvedValueOnce(page([row("failed", "failed")]));
-    act(() => result.current.setStatus("failed"));
+    list.mockResolvedValueOnce(page([row("fresh")]));
+    act(() => bumpServerSettingsVersion());
     await flush();
     finishPage(page([row("old")]));
     await flush();
-    expect(result.current.items.map((item) => item.id)).toEqual(["failed"]);
+    expect(result.current.items.map((item) => item.id)).toEqual(["fresh"]);
     expect(result.current.loadingMore).toBe(false);
   });
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button, Dialog, EmptyState, SectionHeader, Skeleton, useToast } from "../../components";
-import { HeliosError, deleteTranscription, type Transcription } from "../../lib";
+import { HeliosError, deleteTranscription, transcriptionStore, type Transcription } from "../../lib";
 import { useClockTick } from "./clock";
 import { QueueRow } from "./QueueRow";
 import { isTerminalStatus, type QueueRowModel } from "./useTranscribeQueue";
@@ -18,6 +18,14 @@ export interface QueueListProps {
   clearFinished: () => void;
   onOpenLibrary?: (id?: string) => void;
   libraryCount: number;
+  /** True when more rows exist than the loaded ones, so `libraryCount` is a lower bound. */
+  libraryCountIsLowerBound?: boolean;
+  /** True when older rows exist on the server that are not loaded yet. */
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
+  /** True when rows exist on the server, even if none is visible (for example after "Clear completed"). */
+  hasHistory?: boolean;
 }
 
 const SKELETON_ROWS = 3;
@@ -51,8 +59,8 @@ function queueSections(rows: QueueRowModel[]) {
 /**
  * The Queue proper — ACTIVE / RECENT sections, each row fixed at 64px
  * regardless of status. Renders nothing at all when there is truly nothing
- * ever transcribed (`rows.length === 0`): the expanded first-run composer
- * is the entire screen at that point.
+ * ever transcribed (no rows, no older rows, no hidden rows): the expanded
+ * first-run composer is the entire screen at that point.
  */
 export function QueueList({
   rows,
@@ -65,6 +73,11 @@ export function QueueList({
   clearFinished,
   onOpenLibrary,
   libraryCount,
+  libraryCountIsLowerBound = false,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
+  hasHistory = false,
 }: QueueListProps) {
   const now = useClockTick();
   const toast = useToast();
@@ -87,10 +100,13 @@ export function QueueList({
     );
   }
 
-  if (rows.length === 0) return null;
+  if (rows.length === 0 && !hasMore && !hasHistory) return null;
 
   const { activeRows, recentRows } = queueSections(rows);
 
+  // "Clear completed" hides succeeded rows only. Failed and canceled rows stay
+  // until the user removes them: the queue is their only list.
+  const hasCompleted = recentRows.some((row) => row.transcription.status === "succeeded");
   const runningCount = activeRows.filter((r) => r.kind === "real" && r.transcription.status === "running").length;
   const queuedCount = activeRows.length - runningCount;
 
@@ -98,7 +114,13 @@ export function QueueList({
     if (!removalTarget) return;
     setRemoving(true);
     try {
-      await deleteTranscription(removalTarget.id);
+      try {
+        await deleteTranscription(removalTarget.id);
+      } catch (err) {
+        // The server no longer has the row, so the removal is done.
+        if (!(err instanceof HeliosError && err.code === "not_found")) throw err;
+      }
+      transcriptionStore.forget(removalTarget.id);
       setRemovalTarget(undefined);
     } catch (err) {
       const heliosErr = err instanceof HeliosError ? err : new HeliosError("unknown", String(err));
@@ -110,18 +132,18 @@ export function QueueList({
 
   return (
     <div className={styles.container}>
-      {activeRows.length === 0 && recentRows.length > 0 ? (
+      {activeRows.length === 0 && (recentRows.length > 0 || hasHistory || hasMore) ? (
         <EmptyState variant="inline">
           Queue is clear.{" "}
           {onOpenLibrary ? (
             <button type="button" className={styles.libraryLink} onClick={() => onOpenLibrary()}>
               {libraryCount}
-              {libraryCount >= 200 ? "+" : ""} items in Library →
+              {libraryCountIsLowerBound ? "+" : ""} items in Library →
             </button>
           ) : (
             <span className="num">
               {libraryCount}
-              {libraryCount >= 200 ? "+" : ""} items in Library
+              {libraryCountIsLowerBound ? "+" : ""} items in Library
             </span>
           )}
         </EmptyState>
@@ -154,9 +176,11 @@ export function QueueList({
           <SectionHeader
             sticky
             action={
-              <Button size="sm" variant="ghost" onClick={clearFinished}>
-                Clear finished
-              </Button>
+              hasCompleted ? (
+                <Button size="sm" variant="ghost" onClick={clearFinished}>
+                  Clear completed
+                </Button>
+              ) : undefined
             }
           >
             RECENT
@@ -178,6 +202,14 @@ export function QueueList({
             ))}
           </ul>
         </>
+      ) : null}
+
+      {hasMore ? (
+        <div className={styles.footer}>
+          <Button size="sm" variant="neutral" loading={loadingMore} onClick={onLoadMore}>
+            Load older transcriptions
+          </Button>
+        </div>
       ) : null}
 
       <Dialog

@@ -35,31 +35,58 @@ test('Queue puts running work first and pending work in submission order', async
   expect(await active.allTextContents()).toEqual([expect.stringContaining('running.wav'), expect.stringContaining('old-pending.wav'), expect.stringContaining('new-pending.wav')]);
 });
 
-test('Library excludes empty uploads and orders active sources before newest completions', async ({ page }) => {
-  const empty = item('empty', 'canceled'); empty.audio.sizeBytes = 0;
-  const rows = [item('older', 'succeeded'), item('latest', 'succeeded', '2026-10-12T10:00:00Z', '2026-10-14T11:00:00Z'), item('pending', 'pending'), item('running', 'running'), empty];
+test('Library lists only finished items, newest completion first', async ({ page }) => {
+  const empty = item('empty', 'succeeded'); empty.audio.sizeBytes = 0;
+  const rows = [item('older', 'succeeded'), item('latest', 'succeeded', '2026-10-12T10:00:00Z', '2026-10-14T11:00:00Z'), item('pending', 'pending'), item('running', 'running'), item('failed', 'failed'), item('canceled', 'canceled'), empty];
   await mockService(page, () => rows); await page.goto('/');
   const query = page.waitForRequest(r => r.url().includes('library=true'));
   await page.getByRole('button', { name: 'Library', exact: true }).click(); await query;
   const library = page.getByRole('list', { name: 'Transcriptions', exact: true }).getByRole('listitem');
-  await expect(library).toHaveCount(4);
-  expect(await library.allTextContents()).toEqual([expect.stringContaining('running.wav'), expect.stringContaining('pending.wav'), expect.stringContaining('latest.wav'), expect.stringContaining('older.wav')]);
-  await expect(page.getByText('empty.wav', { exact: true })).toHaveCount(0);
+  await expect(library).toHaveCount(2);
+  expect(await library.allTextContents()).toEqual([expect.stringContaining('latest.wav'), expect.stringContaining('older.wav')]);
+  for (const name of ['pending', 'running', 'failed', 'canceled', 'empty']) await expect(page.getByText(`${name}.wav`, { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('radio', { name: 'Failed', exact: true })).toHaveCount(0);
 });
 
+// Unfinished items stay in the queue. A double-click opens their detail view.
 for (const status of ['pending', 'running', 'failed', 'canceled'] as const) {
-  test(`Stored ${status} audio stays downloadable while transcript export is unavailable`, async ({ page }) => {
+  test(`Stored ${status} audio stays downloadable from the queue while transcript export is unavailable`, async ({ page }) => {
     const rows = [item(`source-${status}`, status)]; await mockService(page, () => rows); await page.goto('/');
-    await page.getByRole('button', { name: 'Library', exact: true }).click();
     await page.getByText(`source-${status}.wav`, { exact: true }).dblclick();
     await expect(page.getByRole('button', { name: 'Download audio', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Save as…', exact: true })).toHaveCount(0);
   });
 }
 
+test('A later visit to the Library does not reopen the item from "View in Library"', async ({ page }) => {
+  const rows = [item('failed-once', 'failed'), item('done')]; await mockService(page, () => rows); await page.goto('/');
+  await page.getByText('failed-once.wav', { exact: true }).dblclick();
+  await expect(page.getByRole('button', { name: 'Download audio', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Transcribe', exact: true }).click();
+  await page.getByRole('button', { name: 'Library', exact: true }).click();
+  await expect(page.getByText('done.wav', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Download audio', exact: true })).toHaveCount(0);
+});
+
+test('Queue keeps failed rows after Clear completed', async ({ page }) => {
+  const rows = [item('done'), item('failed-one', 'failed')]; await mockService(page, () => rows); await page.goto('/');
+  await page.getByRole('button', { name: 'Clear completed', exact: true }).click();
+  await expect(page.getByText('done.wav', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('failed-one.wav', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Clear completed', exact: true })).toHaveCount(0);
+});
+
+test('Clear completed on a queue of only succeeded rows keeps the queue, not the first-run screen', async ({ page }) => {
+  const rows = [item('done-a'), item('done-b')]; await mockService(page, () => rows); await page.goto('/');
+  await page.getByRole('button', { name: 'Clear completed', exact: true }).click();
+  await expect(page.getByText('done-a.wav', { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/Queue is clear/)).toBeVisible();
+  await expect(page.getByRole('button', { name: /2 items in Library/ })).toBeVisible();
+});
+
 test('Open detail updates when a polled transcription completes', async ({ page }) => {
   let rows = [item('live', 'running')]; await mockService(page, () => rows); await page.goto('/');
-  await page.getByRole('button', { name: 'Library', exact: true }).click(); await page.getByText('live.wav', { exact: true }).dblclick();
+  await page.getByText('live.wav', { exact: true }).dblclick();
   await expect(page.getByRole('button', { name: 'Save as…', exact: true })).toHaveCount(0);
   rows = [item('live')];
   await expect(page.getByRole('button', { name: 'Save as…', exact: true })).toBeVisible({ timeout: 12000 });
@@ -83,7 +110,7 @@ test('Real source and transcript downloads stream and distinct URLs launch promp
 
 test('Live detail still updates when search hides its row', async ({ page }) => {
   let rows = [item('hidden-live', 'running')]; await mockService(page, () => rows); await page.goto('/');
-  await page.getByRole('button', { name: 'Library', exact: true }).click(); await page.getByText('hidden-live.wav', { exact: true }).dblclick();
+  await page.getByText('hidden-live.wav', { exact: true }).dblclick();
   await page.getByRole('textbox', { name: /Search/ }).fill('does-not-match');
   rows = [item('hidden-live')];
   await expect(page.getByRole('button', { name: 'Save as…', exact: true })).toBeVisible({ timeout: 12000 });
@@ -100,7 +127,6 @@ test('Real paginated Library has globally ordered completions and excludes empty
   const all = [...first.items, ...second.items]; expect(new Set(all.map(row => row.id)).size).toBe(45);
   expect(all.every(row => row.audio.sizeBytes > 0)).toBeTruthy();
   await page.goto('/'); await page.getByRole('button', { name: 'Library', exact: true }).click();
-  await page.getByRole('radio', { name: 'Complete', exact: true }).click();
   const list = page.getByRole('list', { name: 'Transcriptions', exact: true }).getByRole('listitem');
   await expect(list).toHaveCount(40); await page.getByRole('button', { name: 'Load more', exact: true }).click();
   await expect(list).toHaveCount(45); await expect(page.getByText('empty upload.wav', { exact: true })).toHaveCount(0);
@@ -108,9 +134,9 @@ test('Real paginated Library has globally ordered completions and excludes empty
 
 test('Real canceled upload can download its stored audio without a transcript', async ({ page, request }) => {
   test.skip(!process.env.HELIOS_WEB_API_URL, 'Requires the isolated validation backend with canceled source audio.');
-  const response = await request.get(`${process.env.HELIOS_WEB_API_URL}/api/v1/transcriptions?library=true&status=canceled&limit=1`);
+  const response = await request.get(`${process.env.HELIOS_WEB_API_URL}/api/v1/transcriptions?status=canceled&limit=1`);
   expect(response.ok()).toBeTruthy(); const { items } = await response.json(); expect(items).toHaveLength(1);
-  await page.goto('/'); await page.getByRole('button', { name: 'Library', exact: true }).click();
+  await page.goto('/');
   await page.getByText(items[0].audio.filename, { exact: true }).dblclick();
   await expect(page.getByRole('button', { name: 'Save as…', exact: true })).toHaveCount(0);
   const downloaded = page.waitForEvent('download'); await page.getByRole('button', { name: 'Download audio', exact: true }).click();

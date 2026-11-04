@@ -21,7 +21,7 @@ import {
  * upload-in-flight bookkeeping, and owns the row-lifecycle behaviour this
  * feature needs: an "uploading…" placeholder for the (possibly slow, for a
  * large file) window between choosing a file and the server actually
- * accepting the job, cancel's optimism, and "Clear finished"'s
+ * accepting the job, cancel's optimism, and "Clear completed"'s
  * view-local dismissal.
  *
  * Deliberately NOT a second polling cache — every row this hook produces
@@ -47,7 +47,7 @@ export interface UseTranscribeQueue {
   retry: (id: string) => void;
   isCanceling: (id: string) => boolean;
   isEntering: (key: string) => boolean;
-  /** Hides every currently-terminal row from view. Client-only — never deletes anything, just stops showing it until the app restarts. */
+  /** Hides every succeeded row from view. Client-only — never deletes anything, just stops showing it until the app restarts. Failed and canceled rows stay: the queue is their only list. */
   clearFinished: () => void;
 }
 
@@ -245,7 +245,7 @@ export function useTranscribeQueue(): UseTranscribeQueue {
     setDismissedIds((prev) => {
       const next = new Set(prev);
       for (const t of transcriptionsRef.current) {
-        if (isTerminalStatus(t.status)) next.add(t.id);
+        if (t.status === "succeeded") next.add(t.id);
       }
       return next;
     });

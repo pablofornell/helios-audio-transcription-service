@@ -24,6 +24,12 @@
   border-radius: var(--radius-xs);
 }
 
+.footer {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-4);
+}
+
 /* Loading skeleton — real row geometry (64px, the same thumb size a real
    row uses), never a centred spinner on a list. */
 .skeletonRow {

@@ -1,8 +1,9 @@
+import { useToast } from "../../components";
 import { Composer } from "./Composer";
 import { QueueList } from "./QueueList";
 import { useTranscribeQueue } from "./useTranscribeQueue";
-import { useConnection, useTranscriptions } from "../../lib";
-import { hasStoredAudio } from "../../lib/contentEligibility";
+import { HeliosError, transcriptionStore, useConnection, useTranscriptions } from "../../lib";
+import { isLibraryEligible } from "../../lib/contentEligibility";
 import styles from "./TranscribeScreen.module.css";
 
 export interface TranscribeScreenProps {
@@ -16,7 +17,8 @@ export interface TranscribeScreenProps {
  * is this component's own implementation detail.
  */
 export function TranscribeScreen({ onOpenLibrary }: TranscribeScreenProps) {
-  const { transcriptions } = useTranscriptions();
+  const { transcriptions, hasMore, loadingMore } = useTranscriptions();
+  const toast = useToast();
   const connection = useConnection();
   const queue = useTranscribeQueue();
 
@@ -25,8 +27,18 @@ export function TranscribeScreen({ onOpenLibrary }: TranscribeScreenProps) {
   // first fetch we don't yet know whether this is a first run or not, and
   // defaulting to the docked bar over the full-surface takeover is the
   // safer guess either way.
-  const expanded = !queue.loading && queue.rows.length === 0;
-  const libraryCount = transcriptions.filter(hasStoredAudio).length;
+  // "Clear completed" can hide every visible row. The composer stays docked
+  // then, because rows still exist on the server.
+  const hasHistory = transcriptions.length > 0;
+  const expanded = !queue.loading && queue.rows.length === 0 && !hasHistory;
+  // The count covers the loaded rows. While older rows exist, it is a lower bound.
+  const libraryCount = transcriptions.filter(isLibraryEligible).length;
+  const loadMore = () => {
+    transcriptionStore.loadMore().catch((err: unknown) => {
+      const heliosErr = err instanceof HeliosError ? err : new HeliosError("unknown", String(err));
+      toast.show({ message: `Couldn't load older transcriptions — ${heliosErr.message}` });
+    });
+  };
   const connectionStale = connection.status === "reconnecting";
 
   return (
@@ -48,6 +60,11 @@ export function TranscribeScreen({ onOpenLibrary }: TranscribeScreenProps) {
             clearFinished={queue.clearFinished}
             onOpenLibrary={onOpenLibrary}
             libraryCount={libraryCount}
+            libraryCountIsLowerBound={hasMore}
+            hasHistory={hasHistory}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            onLoadMore={loadMore}
           />
         </div>
       ) : null}

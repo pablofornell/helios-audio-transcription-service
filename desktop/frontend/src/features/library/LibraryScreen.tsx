@@ -8,6 +8,7 @@ import {
   get,
   HeliosError,
   retry,
+  transcriptionStore,
   useServerSettingsVersion,
   type Transcription,
   type TranscriptFormat,
@@ -25,6 +26,8 @@ const OVERLAY_BREAKPOINT = 1120;
 export interface LibraryScreenProps {
   /** A transcription id the Transcribe queue asked us to open, e.g. via a row's "View in Library" action — a one-shot hand-off from `App.tsx`, not shared state. */
   openId?: string;
+  /** Called once the screen has taken `openId`, so the shell can clear the hand-off. Without it, a later visit to the Library would open the same item again. */
+  onOpenIdConsumed?: () => void;
 }
 
 /**
@@ -33,7 +36,7 @@ export interface LibraryScreenProps {
  * a detail panel that is a third column above `OVERLAY_BREAKPOINT` and a
  * scrim-backed overlay sheet below it.
  */
-export function LibraryScreen({ openId }: LibraryScreenProps) {
+export function LibraryScreen({ openId, onOpenIdConsumed }: LibraryScreenProps) {
   const toast = useToast();
   const query = useLibraryQuery();
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
@@ -113,6 +116,7 @@ export function LibraryScreen({ openId }: LibraryScreenProps) {
   useEffect(() => {
     if (!openId || consumedOpenIdRef.current === openId) return;
     consumedOpenIdRef.current = openId;
+    onOpenIdConsumed?.();
     void openDetail(openId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openId]);
@@ -179,8 +183,14 @@ export function LibraryScreen({ openId }: LibraryScreenProps) {
     const sameDialog = () => sameServer() && session === deleteSessionRef.current;
     setDeleting(true);
     try {
-      await deleteTranscription(id);
+      try {
+        await deleteTranscription(id);
+      } catch (err) {
+        // The server no longer has the item, so the deletion is done.
+        if (!(err instanceof HeliosError && err.code === "not_found")) throw err;
+      }
       if (!sameServer()) return;
+      transcriptionStore.forget(id);
       // A canceled dialog still completed the deletion on this server.
       query.removeItem(id);
       setDetail((current) => current?.id === id ? undefined : current);
@@ -214,7 +224,6 @@ export function LibraryScreen({ openId }: LibraryScreenProps) {
           selectedId={selectedId}
           onSelect={setSelectedId}
           onOpenDetail={openDetail}
-          onRetry={handleRetry}
           onSaveAs={(id) => openSaveAs(id, "txt")}
           onDelete={openDelete}
         />
