@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Transcription } from "../../lib";
 import { TranscribeScreen } from "./TranscribeScreen";
@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
   transcriptions: [] as unknown[],
   hasMore: false,
   rows: [] as unknown[],
+  prioritize: vi.fn(),
 }));
 vi.mock("../../lib", async (original) => ({
   ...(await original<typeof import("../../lib")>()),
@@ -22,7 +23,7 @@ vi.mock("./Composer", () => ({ Composer: ({ variant }: { variant: string }) => <
 vi.mock("./useTranscribeQueue", async (original) => ({
   ...(await original<typeof import("./useTranscribeQueue")>()),
   useTranscribeQueue: () => ({
-    rows: state.rows, loading: false, submit: vi.fn(), cancel: vi.fn(), retry: vi.fn(),
+    rows: state.rows, loading: false, submit: vi.fn(), cancel: vi.fn(), retry: vi.fn(), prioritize: state.prioritize,
     isCanceling: () => false, isEntering: () => false, clearFinished: vi.fn(),
   }),
 }));
@@ -56,5 +57,16 @@ describe("first-run composer", () => {
     expect(screen.getByTestId("composer")).toHaveAttribute("data-variant", "collapsed");
     expect(screen.getByRole("button", { name: "Load older transcriptions" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /1\+ items in Library/ })).toBeInTheDocument();
+  });
+});
+
+describe("priority processing", () => {
+  it("wires the Priority processing button of a queued row to the queue hook", () => {
+    const pending = { ...finished("queued"), status: "pending", completedAt: undefined, result: undefined } as Transcription;
+    state.transcriptions = [pending];
+    state.rows = [{ kind: "real", key: "queued", transcription: pending }];
+    render(<TranscribeScreen onOpenLibrary={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Priority processing" }));
+    expect(state.prioritize).toHaveBeenCalledWith("queued");
   });
 });

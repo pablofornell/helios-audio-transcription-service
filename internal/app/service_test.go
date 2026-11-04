@@ -514,6 +514,52 @@ func TestRetry_Success(t *testing.T) {
 	assert.Nil(t, retried.Error)
 }
 
+func TestPrioritize_PendingJobGetsPriorityAt(t *testing.T) {
+	h := newHarness(t)
+	got, err := h.svc.Submit(context.Background(), submitBody(t, "a.wav", "d"))
+	require.NoError(t, err)
+
+	prioritized, err := h.svc.Prioritize(context.Background(), got.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusPending, prioritized.Status)
+	require.NotNil(t, prioritized.PriorityAt)
+	assert.Equal(t, 1, countOf(h.calls.snapshot(), "repo.Prioritize"))
+}
+
+func TestPrioritize_FailedJobResetsRetryState(t *testing.T) {
+	h := newHarness(t)
+	got, err := h.svc.Submit(context.Background(), submitBody(t, "a.wav", "d"))
+	require.NoError(t, err)
+
+	row, err := h.repo.Get(context.Background(), got.ID)
+	require.NoError(t, err)
+	row.Status = domain.StatusFailed
+	row.Attempts = 3
+	row.Error = domain.New(domain.ErrCodeToolFailure, "whisper-cli exited 1")
+	h.repo.db.seed(row)
+
+	prioritized, err := h.svc.Prioritize(context.Background(), got.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusPending, prioritized.Status)
+	assert.Equal(t, 0, prioritized.Attempts)
+	assert.Nil(t, prioritized.Error)
+	assert.NotNil(t, prioritized.PriorityAt)
+}
+
+func TestPrioritize_ConflictAndNotFoundPassThrough(t *testing.T) {
+	h := newHarness(t)
+	got, err := h.svc.Submit(context.Background(), submitBody(t, "a.wav", "d"))
+	require.NoError(t, err)
+
+	_, err = h.svc.Cancel(context.Background(), got.ID)
+	require.NoError(t, err)
+	_, err = h.svc.Prioritize(context.Background(), got.ID)
+	assert.Equal(t, domain.ErrCodeConflict, domain.CodeOf(err), "a canceled job cannot get priority")
+
+	_, err = h.svc.Prioritize(context.Background(), uuid.NewString())
+	assert.Equal(t, domain.ErrCodeNotFound, domain.CodeOf(err))
+}
+
 // ---------------------------------------------------------------------------
 // OpenSource
 // ---------------------------------------------------------------------------
@@ -573,6 +619,9 @@ func TestInvalidID_ShortCircuitsBeforeRepository(t *testing.T) {
 	_, err = h.svc.Retry(context.Background(), bad)
 	assert.Equal(t, domain.ErrCodeInvalidInput, domain.CodeOf(err))
 
+	_, err = h.svc.Prioritize(context.Background(), bad)
+	assert.Equal(t, domain.ErrCodeInvalidInput, domain.CodeOf(err))
+
 	_, _, err = h.svc.OpenSource(context.Background(), bad)
 	assert.Equal(t, domain.ErrCodeInvalidInput, domain.CodeOf(err))
 
@@ -581,6 +630,7 @@ func TestInvalidID_ShortCircuitsBeforeRepository(t *testing.T) {
 	assert.Equal(t, 0, countOf(calls, "repo.Delete"))
 	assert.Equal(t, 0, countOf(calls, "repo.RequestCancel"))
 	assert.Equal(t, 0, countOf(calls, "repo.Requeue"))
+	assert.Equal(t, 0, countOf(calls, "repo.Prioritize"))
 }
 
 // ---------------------------------------------------------------------------

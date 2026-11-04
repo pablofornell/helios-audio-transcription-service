@@ -131,3 +131,29 @@ func TestCancel_And_Retry_DecodeTranscription(t *testing.T) {
 		assert.Equal(t, domain.StatusPending, got.Status)
 	})
 }
+
+func TestPrioritize_DecodesTranscriptionWithPriorityAt(t *testing.T) {
+	id := mustID(t)
+	at := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
+
+	cc, _ := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/transcriptions/"+id+"/prioritize", r.URL.Path)
+		writeJSON(t, w, http.StatusAccepted, domain.Transcription{ID: id, Status: domain.StatusPending, PriorityAt: &at})
+	}))
+	got, err := cc.Prioritize(context.Background(), id)
+	require.NoError(t, err)
+	assert.Equal(t, domain.StatusPending, got.Status)
+	require.NotNil(t, got.PriorityAt)
+	assert.True(t, at.Equal(*got.PriorityAt))
+}
+
+func TestPrioritize_ConflictMapsToConflictCode(t *testing.T) {
+	id := mustID(t)
+	cc, _ := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeErrorEnvelope(t, w, http.StatusConflict, domain.ErrCodeConflict, "transcription is not pending or failed")
+	}))
+	_, err := cc.Prioritize(context.Background(), id)
+	require.Error(t, err)
+	assert.Equal(t, domain.ErrCodeConflict, domain.CodeOf(err))
+}

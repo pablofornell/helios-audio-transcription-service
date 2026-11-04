@@ -26,6 +26,8 @@ export function List(arg1:main.ListFilterDTO):Promise<main.ListPageDTO>;
 
 export function OpenAudio(arg1:string):Promise<void>;
 
+export function Prioritize(arg1:string):Promise<main.TranscriptionDTO>;
+
 export function Retry(arg1:string):Promise<main.TranscriptionDTO>;
 
 export function RevealInFileManager(arg1:string):Promise<void>;

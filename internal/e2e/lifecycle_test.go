@@ -210,6 +210,45 @@ func TestRetry_ConflictUnlessFailedOrCanceled(t *testing.T) {
 	assert.Equal(t, domain.ErrCodeConflict, derr.Code)
 }
 
+// TestPrioritize_PendingGetsPriorityAndTerminalConflicts submits against a
+// pool that is not started, so the row stays pending. POST /prioritize on it
+// answers 202 with priorityAt set. After a cancel, the same call answers 409
+// and the row has no priorityAt. An unknown id answers 404.
+func TestPrioritize_PendingGetsPriorityAndTerminalConflicts(t *testing.T) {
+	requireDocker(t)
+	requireFFmpeg(t)
+
+	cfg := newTestConfig(t)
+	st := newRawStack(t, cfg, nil)
+	base := serveStack(t, st)
+
+	created := submitFile(t, base, fixtureGoodMP3, "audio/mpeg", nil)
+	require.Equal(t, domain.StatusPending, created.Status)
+	assert.Nil(t, created.PriorityAt)
+
+	resp := prioritizeTranscription(t, base, created.ID)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusAccepted, resp.StatusCode)
+	prioritized := decodeJSON[domain.Transcription](t, resp)
+	assert.Equal(t, domain.StatusPending, prioritized.Status)
+	require.NotNil(t, prioritized.PriorityAt)
+	require.NotNil(t, getTranscription(t, base, created.ID).PriorityAt, "GET shows priorityAt too")
+
+	cancelResp := cancelTranscription(t, base, created.ID)
+	defer cancelResp.Body.Close()
+	require.Equal(t, http.StatusOK, cancelResp.StatusCode)
+	assert.Nil(t, getTranscription(t, base, created.ID).PriorityAt, "cancel clears the priority")
+
+	conflict := prioritizeTranscription(t, base, created.ID)
+	defer conflict.Body.Close()
+	assert.Equal(t, http.StatusConflict, conflict.StatusCode)
+	assert.Equal(t, domain.ErrCodeConflict, decodeError(t, conflict).Code)
+
+	missing := prioritizeTranscription(t, base, "11111111-1111-4111-8111-111111111111")
+	defer missing.Body.Close()
+	assert.Equal(t, http.StatusNotFound, missing.StatusCode)
+}
+
 // TestDelete_RemovesRowAndStoredDirectory submits, lets it succeed (so
 // there is a real stored source file to prove gets removed), deletes it,
 // and asserts both the database row (404 on a subsequent Get) and the

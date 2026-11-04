@@ -475,6 +475,12 @@ func retryTranscription(t *testing.T, base, id string) *http.Response {
 	return doJSON(t, http.MethodPost, base+"/api/v1/transcriptions/"+id+"/retry", nil)
 }
 
+// prioritizeTranscription calls POST /api/v1/transcriptions/{id}/prioritize.
+func prioritizeTranscription(t *testing.T, base, id string) *http.Response {
+	t.Helper()
+	return doJSON(t, http.MethodPost, base+"/api/v1/transcriptions/"+id+"/prioritize", nil)
+}
+
 // deleteTranscription calls DELETE /api/v1/transcriptions/{id} and requires
 // a 204.
 func deleteTranscription(t *testing.T, base, id string) {

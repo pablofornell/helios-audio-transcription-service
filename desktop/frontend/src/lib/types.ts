@@ -161,6 +161,8 @@ export interface Transcription {
   updatedAt: string;
   startedAt?: string;
   completedAt?: string;
+  /** When the user asked to process this job first. Null or absent: no priority. Cleared when the job ends. */
+  priorityAt?: string | null;
 }
 
 /**

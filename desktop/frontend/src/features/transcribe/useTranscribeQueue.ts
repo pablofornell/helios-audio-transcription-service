@@ -5,6 +5,7 @@ import {
   getServerSettingsVersion,
   useServerSettingsVersion,
   cancel as apiCancel,
+  prioritize as apiPrioritize,
   retry as apiRetry,
   submit as apiSubmit,
   transcriptionStore,
@@ -45,6 +46,8 @@ export interface UseTranscribeQueue {
   submit: (source: AudioSource, options: Options) => Promise<SubmitOutcome>;
   cancel: (id: string) => void;
   retry: (id: string) => void;
+  /** Puts this row first in the queue and resets its retry state. The row updates as soon as the server answers. */
+  prioritize: (id: string) => void;
   isCanceling: (id: string) => boolean;
   isEntering: (key: string) => boolean;
   /** Hides every succeeded row from view. Client-only — never deletes anything, just stops showing it until the app restarts. Failed and canceled rows stay: the queue is their only list. */
@@ -77,6 +80,7 @@ export function useTranscribeQueue(): UseTranscribeQueue {
   const entranceTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const pendingCancels = useRef(new Set<string>());
   const pendingRetries = useRef(new Set<string>());
+  const pendingPrioritizes = useRef(new Set<string>());
 
   const isCurrent = useCallback((version: number) => mountedRef.current && version === getServerSettingsVersion(), []);
 
@@ -103,6 +107,7 @@ export function useTranscribeQueue(): UseTranscribeQueue {
     entranceTimers.current.clear();
     pendingCancels.current.clear();
     pendingRetries.current.clear();
+    pendingPrioritizes.current.clear();
     seenKeysRef.current.clear();
     initializedRef.current = false;
     setUploading([]);
@@ -241,6 +246,30 @@ export function useTranscribeQueue(): UseTranscribeQueue {
     [isCurrent, toast.show],
   );
 
+  const prioritize = useCallback(
+    (id: string) => {
+      if (pendingPrioritizes.current.has(id)) return;
+      const version = getServerSettingsVersion();
+      pendingPrioritizes.current.add(id);
+      apiPrioritize(id)
+        .then((transcription) => {
+          // The answer holds the row with its new priority. Show it now, then refresh.
+          if (isCurrent(version)) transcriptionStore.upsert(transcription);
+        })
+        .catch((err: unknown) => {
+          if (!isCurrent(version)) return;
+          const heliosErr = err instanceof HeliosError ? err : new HeliosError("unknown", String(err));
+          toast.show({ message: `Couldn't prioritize — ${heliosErr.message}` });
+          // The row may have changed on the server (for example it started to run), so show its real state.
+          transcriptionStore.refreshNow();
+        })
+        .finally(() => {
+          if (isCurrent(version)) pendingPrioritizes.current.delete(id);
+        });
+    },
+    [isCurrent, toast.show],
+  );
+
   const clearFinished = useCallback(() => {
     setDismissedIds((prev) => {
       const next = new Set(prev);
@@ -258,6 +287,7 @@ export function useTranscribeQueue(): UseTranscribeQueue {
     submit,
     cancel,
     retry,
+    prioritize,
     isCanceling: (id: string) => cancelingIds.has(id),
     isEntering: (key: string) => enteringKeys.has(key),
     clearFinished,

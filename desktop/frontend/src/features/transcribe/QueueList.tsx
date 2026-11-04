@@ -15,6 +15,8 @@ export interface QueueListProps {
   isEntering: (key: string) => boolean;
   cancel: (id: string) => void;
   retry: (id: string) => void;
+  /** Puts a row first in the queue. Omitted: rows have no Priority processing button. */
+  prioritize?: (id: string) => void;
   clearFinished: () => void;
   onOpenLibrary?: (id?: string) => void;
   libraryCount: number;
@@ -41,13 +43,31 @@ function compareTimestamps(a: string, b: string): number {
   return fraction(a).localeCompare(fraction(b));
 }
 
-/** Running first, pending in submission order, then upload placeholders. */
+/** `priorityAt` of a row, or `undefined` when the row has no priority. */
+function priorityOf(row: RealQueueRow): string | undefined {
+  const at = row.transcription.priorityAt;
+  return at && !Number.isNaN(Date.parse(at)) ? at : undefined;
+}
+
+/**
+ * Running first, then pending rows in the order the server claims them, then
+ * upload placeholders. The server claims rows with a priority first, newest
+ * click first, and then in submission order.
+ */
 function queueSections(rows: QueueRowModel[]) {
   const real = rows.filter((row): row is RealQueueRow => row.kind === "real");
   const oldestFirst = (a: RealQueueRow, b: RealQueueRow) =>
     compareTimestamps(a.transcription.createdAt, b.transcription.createdAt) || a.key.localeCompare(b.key);
+  const claimOrder = (a: RealQueueRow, b: RealQueueRow) => {
+    const pa = priorityOf(a);
+    const pb = priorityOf(b);
+    if (pa !== undefined && pb !== undefined) return compareTimestamps(pb, pa) || oldestFirst(a, b);
+    if (pa !== undefined) return -1;
+    if (pb !== undefined) return 1;
+    return oldestFirst(a, b);
+  };
   const running = real.filter((row) => row.transcription.status === "running").sort(oldestFirst);
-  const pending = real.filter((row) => row.transcription.status === "pending").sort(oldestFirst);
+  const pending = real.filter((row) => row.transcription.status === "pending").sort(claimOrder);
   const uploading = rows.filter((row) => row.kind === "uploading").reverse();
   const recentRows = real.filter((row) => isTerminalStatus(row.transcription.status)).sort((a, b) =>
     compareTimestamps(b.transcription.completedAt || b.transcription.createdAt, a.transcription.completedAt || a.transcription.createdAt)
@@ -70,6 +90,7 @@ export function QueueList({
   isEntering,
   cancel,
   retry,
+  prioritize,
   clearFinished,
   onOpenLibrary,
   libraryCount,
@@ -163,6 +184,7 @@ export function QueueList({
                 now={now}
                 onCancel={cancel}
                 onRetry={retry}
+                onPrioritize={prioritize}
                 onRemove={setRemovalTarget}
                 onOpenLibrary={onOpenLibrary}
               />
@@ -196,6 +218,7 @@ export function QueueList({
                 now={now}
                 onCancel={cancel}
                 onRetry={retry}
+                onPrioritize={prioritize}
                 onRemove={setRemovalTarget}
                 onOpenLibrary={onOpenLibrary}
               />

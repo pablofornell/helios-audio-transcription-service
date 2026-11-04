@@ -188,6 +188,10 @@ func cloneTranscription(t *domain.Transcription) *domain.Transcription {
 		v := *t.CompletedAt
 		c.CompletedAt = &v
 	}
+	if t.PriorityAt != nil {
+		v := *t.PriorityAt
+		c.PriorityAt = &v
+	}
 	if t.NextAttemptAt != nil {
 		v := *t.NextAttemptAt
 		c.NextAttemptAt = &v
@@ -299,6 +303,26 @@ func (m *memDB) requeue(id string) (*domain.Transcription, error) {
 	row.Attempts = 0
 	row.Error = nil
 	row.CompletedAt = nil
+	delete(m.cancelRequested, id)
+	return cloneTranscription(row), nil
+}
+
+func (m *memDB) prioritize(id string, now time.Time) (*domain.Transcription, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	row, ok := m.rows[id]
+	if !ok {
+		return nil, domain.New(domain.ErrCodeNotFound, fmt.Sprintf("transcription %s not found", id))
+	}
+	if row.Status != domain.StatusFailed && row.Status != domain.StatusPending {
+		return nil, domain.New(domain.ErrCodeConflict, fmt.Sprintf("transcription %s is not pending or failed", id))
+	}
+	row.Status = domain.StatusPending
+	row.Attempts = 0
+	row.Error = nil
+	row.StartedAt = nil
+	row.CompletedAt = nil
+	row.PriorityAt = &now
 	delete(m.cancelRequested, id)
 	return cloneTranscription(row), nil
 }
@@ -507,6 +531,7 @@ type fakeRepository struct {
 	deleteErr        map[string]error
 	requestCancelErr map[string]error
 	requeueErr       map[string]error
+	prioritizeErr    map[string]error
 
 	mu             sync.Mutex
 	lastListFilter ListFilter
@@ -567,6 +592,14 @@ func (r *fakeRepository) Requeue(ctx context.Context, id string) (*domain.Transc
 		return nil, err
 	}
 	return r.db.requeue(id)
+}
+
+func (r *fakeRepository) Prioritize(ctx context.Context, id string) (*domain.Transcription, error) {
+	r.calls.record("repo.Prioritize")
+	if err, ok := r.prioritizeErr[id]; ok {
+		return nil, err
+	}
+	return r.db.prioritize(id, time.Now().UTC())
 }
 
 // ---------------------------------------------------------------------------

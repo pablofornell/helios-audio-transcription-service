@@ -30,7 +30,7 @@ import (
 // with the rest of the service without another knob to wire.
 const otelServiceName = "helios-ats"
 
-// Service is the seven-method surface httpapi drives the business layer
+// Service is the eight-method surface httpapi drives the business layer
 // through. It is declared locally rather than imported as *app.Service, so
 // this package -- and its tests, via the hand-written fake in
 // fake_test.go -- builds and runs independently of internal/app's own
@@ -52,6 +52,9 @@ type Service interface {
 	Cancel(ctx context.Context, id string) (*domain.Transcription, error)
 	// Retry requeues a failed or canceled id. ErrCodeConflict otherwise.
 	Retry(ctx context.Context, id string) (*domain.Transcription, error)
+	// Prioritize puts a pending or failed id first in the queue.
+	// ErrCodeConflict otherwise.
+	Prioritize(ctx context.Context, id string) (*domain.Transcription, error)
 	// OpenSource opens the original uploaded audio for id, for streaming
 	// back to a caller with http.ServeContent.
 	OpenSource(ctx context.Context, id string) (io.ReadSeekCloser, *domain.Transcription, error)
@@ -214,6 +217,7 @@ func mountAPI(r chi.Router, h *handlers, routeTimeout time.Duration) {
 			bounded.Delete("/transcriptions/{id}", h.deleteTranscription)
 			bounded.Post("/transcriptions/{id}/cancel", h.cancelTranscription)
 			bounded.Post("/transcriptions/{id}/retry", h.retryTranscription)
+			bounded.Post("/transcriptions/{id}/prioritize", h.prioritizeTranscription)
 			bounded.Get("/transcriptions/{id}/transcript", h.getTranscript)
 		})
 

@@ -42,6 +42,7 @@ type fakeService struct {
 	deleteFn     func(ctx context.Context, id string) error
 	cancelFn     func(ctx context.Context, id string) (*domain.Transcription, error)
 	retryFn      func(ctx context.Context, id string) (*domain.Transcription, error)
+	prioritizeFn func(ctx context.Context, id string) (*domain.Transcription, error)
 	openSourceFn func(ctx context.Context, id string) (io.ReadSeekCloser, *domain.Transcription, error)
 }
 
@@ -85,6 +86,13 @@ func (f *fakeService) Cancel(ctx context.Context, id string) (*domain.Transcript
 func (f *fakeService) Retry(ctx context.Context, id string) (*domain.Transcription, error) {
 	if f.retryFn != nil {
 		return f.retryFn(ctx, id)
+	}
+	return &domain.Transcription{ID: id}, nil
+}
+
+func (f *fakeService) Prioritize(ctx context.Context, id string) (*domain.Transcription, error) {
+	if f.prioritizeFn != nil {
+		return f.prioritizeFn(ctx, id)
 	}
 	return &domain.Transcription{ID: id}, nil
 }

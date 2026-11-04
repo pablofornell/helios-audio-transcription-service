@@ -158,6 +158,21 @@ describe("get/retry/cancel/deleteTranscription", () => {
     expect(result).toEqual(wire);
   });
 
+  it("POSTs /api/v1/transcriptions/{id}/prioritize and decodes the 202 body", async () => {
+    const wire = makeWireTranscription({ status: "pending", priorityAt: "2026-11-04T10:00:00Z" });
+    fetchMock.mockResolvedValue(jsonResponse(202, wire));
+    const result = await api.prioritize(wire.id);
+    const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe(`/api/v1/transcriptions/${wire.id}/prioritize`);
+    expect(init.method).toBe("POST");
+    expect(result.priorityAt).toBe("2026-11-04T10:00:00Z");
+  });
+
+  it("rejects a prioritize on a canceled transcription with the conflict code", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(409, { error: { code: "conflict", message: "not pending or failed" } }));
+    await expect(api.prioritize("id-1")).rejects.toMatchObject({ code: "conflict" });
+  });
+
   it("POSTs /api/v1/transcriptions/{id}/cancel and resolves void on a 200", async () => {
     fetchMock.mockResolvedValue(jsonResponse(200, makeWireTranscription({ status: "canceled" })));
     await expect(api.cancel("id-1")).resolves.toBeUndefined();

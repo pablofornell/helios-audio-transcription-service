@@ -414,6 +414,10 @@ func (r *remoteClient) Retry(ctx context.Context, id string) (*domain.Transcript
 	return r.current().Retry(ctx, id)
 }
 
+func (r *remoteClient) Prioritize(ctx context.Context, id string) (*domain.Transcription, error) {
+	return r.current().Prioritize(ctx, id)
+}
+
 func (r *remoteClient) GetTranscript(ctx context.Context, id string, format transcript.Format) ([]byte, error) {
 	return r.current().GetTranscript(ctx, id, format)
 }

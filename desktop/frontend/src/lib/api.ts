@@ -63,6 +63,11 @@ export function retry(id: string): Promise<Transcription> {
   return impl().retry(id);
 }
 
+/** Puts a pending or failed transcription first in the queue and resets its retry state. See `app.App.Prioritize`. */
+export function prioritize(id: string): Promise<Transcription> {
+  return impl().prioritize(id);
+}
+
 /** Requests that a pending or running transcription stop. See `app.App.Cancel`. */
 export function cancel(id: string): Promise<void> {
   return impl().cancel(id);

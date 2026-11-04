@@ -173,6 +173,7 @@ type transcriptionDTO struct {
 	UpdatedAt   time.Time     `json:"updatedAt"`
 	StartedAt   *time.Time    `json:"startedAt,omitempty"`
 	CompletedAt *time.Time    `json:"completedAt,omitempty"`
+	PriorityAt  *time.Time    `json:"priorityAt,omitempty"`
 }
 
 // transcriptionFromDomain converts a *domain.Transcription to its wire
@@ -195,6 +196,7 @@ func transcriptionFromDomain(t *domain.Transcription) transcriptionDTO {
 		UpdatedAt:   t.UpdatedAt,
 		StartedAt:   t.StartedAt,
 		CompletedAt: t.CompletedAt,
+		PriorityAt:  t.PriorityAt,
 	}
 }
 

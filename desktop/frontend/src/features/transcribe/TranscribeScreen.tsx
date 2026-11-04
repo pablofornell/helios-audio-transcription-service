@@ -57,6 +57,7 @@ export function TranscribeScreen({ onOpenLibrary }: TranscribeScreenProps) {
             isEntering={queue.isEntering}
             cancel={queue.cancel}
             retry={queue.retry}
+            prioritize={queue.prioritize}
             clearFinished={queue.clearFinished}
             onOpenLibrary={onOpenLibrary}
             libraryCount={libraryCount}

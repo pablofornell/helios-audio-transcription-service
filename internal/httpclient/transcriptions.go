@@ -212,6 +212,15 @@ func (c *Client) Cancel(ctx context.Context, id string) (*domain.Transcription, 
 	return &t, nil
 }
 
+// Prioritize implements POST /api/v1/transcriptions/{id}/prioritize.
+func (c *Client) Prioritize(ctx context.Context, id string) (*domain.Transcription, error) {
+	var t domain.Transcription
+	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/transcriptions/"+url.PathEscape(id)+"/prioritize", nil, &t, http.StatusAccepted); err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
 // Retry implements POST /api/v1/transcriptions/{id}/retry.
 func (c *Client) Retry(ctx context.Context, id string) (*domain.Transcription, error) {
 	var t domain.Transcription
