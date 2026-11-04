@@ -44,9 +44,10 @@ func (t *Transcriber) modelPath(model string) (string, error) {
 // Transcribe implements app.Transcriber.Transcribe (see internal/app's
 // ports.go). It runs in this order:
 //
-//  1. Find the language spoken in the audio: the caller's hint
-//     (Options.Language), or else detection with whisper-cli -dl on the
-//     same WAV, using Options.Model.
+//  1. Detect the language spoken in the audio (see detectLanguage), using
+//     Options.Model. The request never sets it: Options.Language is
+//     ignored, because a wrong hint gave a wrong transcript (Spanish audio
+//     with a "fr" hint came out in English).
 //  2. Apply domain.PlanOutput. Spanish gives Spanish, English gives
 //     English, any other language gives English by translation. The
 //     request's Options.Task plays no part.
@@ -89,15 +90,12 @@ func (t *Transcriber) Transcribe(ctx context.Context, req domain.TranscribeReque
 	ctx, cancel := context.WithTimeout(ctx, t.cfg.Timeout)
 	defer cancel()
 
-	source := req.Options.Language
-	if req.Options.AutoDetectLanguage() {
-		source, err = t.detectLanguage(ctx, req, modelPath)
-		if err != nil {
-			return nil, err
-		}
+	detected, err := t.detectLanguage(ctx, req, modelPath)
+	if err != nil {
+		return nil, err
 	}
 
-	plan := domain.PlanOutput(source)
+	plan := domain.PlanOutput(detected.Language)
 	runModel, runModelPath := req.Options.Model, modelPath
 	if plan.Translate {
 		runModel = t.cfg.TranslationModel

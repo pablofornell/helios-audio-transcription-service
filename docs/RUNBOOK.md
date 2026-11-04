@@ -342,7 +342,8 @@ curl -X POST localhost:7462/api/v1/transcriptions/<id>/retry
 ```
 
 The service never falls back to the turbo model for a translation: turbo would return
-the original language, so the job fails instead.
+the original language, so the job fails instead. The desktop app shows a Retry control
+for this code. The retry endpoint re-queues any `failed` job, whatever its error code.
 
 There's no bulk-retry endpoint; script over
 `GET /api/v1/transcriptions?status=failed` if you need one. If several jobs failed for

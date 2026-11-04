@@ -41,7 +41,7 @@ func closedPortAddr(t *testing.T) string {
 // ---------------------------------------------------------------------------
 
 func TestBuildTranscriber_selectsWhispercppByDefault(t *testing.T) {
-	tr := buildTranscriber(config.TranscriberConfig{Kind: "whispercpp", Binary: "whisper-cli"}, nil)
+	tr := buildTranscriber(config.TranscriberConfig{Kind: "whispercpp", Binary: "whisper-cli"}, "", nil, nil)
 	_, ok := tr.(*whispercpp.Transcriber)
 	assert.True(t, ok, "expected *whispercpp.Transcriber, got %T", tr)
 }
@@ -77,7 +77,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 `), 0o755))
-			tr := buildTranscriber(config.TranscriberConfig{Kind: "whispercpp", Binary: bin, ModelDir: dir, NoGPU: tt.noGPU, GPUDevice: 2, Timeout: 5 * time.Second}, nil)
+			tr := buildTranscriber(config.TranscriberConfig{Kind: "whispercpp", Binary: bin, ModelDir: dir, NoGPU: tt.noGPU, GPUDevice: 2, Timeout: 5 * time.Second}, "", nil, nil)
 			_, err := tr.Transcribe(context.Background(), domain.TranscribeRequest{AudioPath: filepath.Join(dir, "audio.wav"), Options: domain.Options{Model: "base", Task: domain.TaskTranscribe, BeamSize: 5}})
 			require.NoError(t, err)
 			args, err := os.ReadFile(argsPath)
@@ -126,7 +126,7 @@ func TestBuildTranscriber_forwardsTranslationModel(t *testing.T) {
 	bin := filepath.Join(dir, "whisper-cli-stub.sh")
 	require.NoError(t, os.WriteFile(bin, []byte(langStub), 0o755))
 
-	tr := buildTranscriber(config.TranscriberConfig{Kind: "whispercpp", Binary: bin, ModelDir: dir, TranslationModel: "large-v3", Timeout: 5 * time.Second}, nil)
+	tr := buildTranscriber(config.TranscriberConfig{Kind: "whispercpp", Binary: bin, ModelDir: dir, TranslationModel: "large-v3", Timeout: 5 * time.Second}, "", nil, nil)
 	got, err := tr.Transcribe(context.Background(), domain.TranscribeRequest{AudioPath: filepath.Join(dir, "audio.wav"), Options: domain.Options{Model: "base", Task: domain.TaskTranscribe, BeamSize: 5}})
 	require.NoError(t, err)
 	assert.Equal(t, "large-v3", got.Model)
@@ -155,7 +155,7 @@ func TestBuildTranscriber_readyWithoutTranslationModel(t *testing.T) {
 	tr := buildTranscriber(config.TranscriberConfig{
 		Kind: "whispercpp", Binary: bin, ModelDir: dir, DefaultModel: "base",
 		TranslationModel: "large-v3-q5_0", Timeout: 5 * time.Second,
-	}, nil)
+	}, "", nil, nil)
 
 	require.NoError(t, transcriberChecker{transcriber: tr}.Check(context.Background()), "readiness must not need the translation model")
 
@@ -170,14 +170,14 @@ func TestBuildTranscriber_readyWithoutTranslationModel(t *testing.T) {
 }
 
 func TestBuildTranscriber_selectsFakeWhenConfigured(t *testing.T) {
-	tr := buildTranscriber(config.TranscriberConfig{Kind: "fake"}, nil)
+	tr := buildTranscriber(config.TranscriberConfig{Kind: "fake"}, "", nil, nil)
 	_, ok := tr.(*fake.Transcriber)
 	assert.True(t, ok, "expected *fake.Transcriber, got %T", tr)
 }
 
 func TestBuildTranscriber_overrideAlwaysWinsRegardlessOfKind(t *testing.T) {
 	override := fake.New(fake.Config{})
-	tr := buildTranscriber(config.TranscriberConfig{Kind: "whispercpp"}, override)
+	tr := buildTranscriber(config.TranscriberConfig{Kind: "whispercpp"}, "", nil, override)
 	assert.Same(t, override, tr)
 }
 

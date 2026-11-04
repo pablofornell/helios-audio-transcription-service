@@ -172,16 +172,20 @@ never on the HTTP request path:
    WAV at `transcriptions/<id>/audio.wav` — see **Why 16 kHz mono WAV**, below.
 4. **Transcribe** the WAV with `whisper-cli` (`internal/transcriber/whispercpp`),
    parsing its `-oj`/`-ojf` JSON output into a `domain.Result`. This step runs two
-   `whisper-cli` processes in order. First, `whisper-cli -dl` detects the audio
-   language (skipped when the caller gave a language hint). Then
-   `domain.PlanOutput` applies the language rule: Spanish stays Spanish, English
-   stays English, any other language becomes English by translation (`-tr`, with the
-   translation model, because the turbo model cannot translate). `Options.Task` plays
-   no part. `Config.Timeout` and the job timeout cover both processes, and both
-   honour cancellation. A failed detection is a retryable `tool_failure`: the service
-   never guesses a language. A missing translation model is a non-retryable
-   `model_unavailable`: `Transcriber.Available` does not check it, so the service
-   still starts and serves Spanish and English without it.
+   `whisper-cli` steps in order. First, `whisper-cli -dl` detects the audio language.
+   The request never sets it: `Options.Language` is ignored. Detection runs on a clip
+   (up to 30 s) cut with `ffmpeg` from the start of the audio with the leading silence
+   removed. If the probability is under 0.5, it also tries clips at one third and two
+   thirds of the audio and keeps the most probable answer. A low probability never
+   fails a job. Then `domain.PlanOutput` applies the language rule: Spanish stays
+   Spanish, English stays English, any other language becomes English by translation
+   (`-tr`, with the translation model, because the turbo model cannot translate).
+   `Options.Task` plays no part. `Config.Timeout` and the job timeout cover all
+   processes, and all of them honour cancellation. A failed detection is a retryable
+   `tool_failure`: the service never guesses a language. A missing translation model
+   is a non-retryable `model_unavailable`, and an operator retries the job by hand
+   after `make models`. `Transcriber.Available` does not check that model, so the
+   service still starts and serves Spanish and English without it.
 5. **Finish**: persist the `Result` (or `Error`) and the probed `Audio` metadata, then
    unconditionally delete the normalized WAV — success or failure, it is large,
    derived, and worth nothing once the job is done with it. The original upload is

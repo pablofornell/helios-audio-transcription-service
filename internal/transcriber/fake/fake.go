@@ -34,6 +34,11 @@ type Config struct {
 	// Transcribe proceeds to success or failure — gives a test something to
 	// race a cancellation against.
 	Delay time.Duration
+	// DetectedLanguage is the language the fake "detects" in every audio
+	// file. Empty means "en". A test sets it to simulate Spanish audio
+	// ("es"), audio in a third language ("fr") and so on. The request's
+	// Options.Language hint has no effect, as in the real engine.
+	DetectedLanguage string
 }
 
 // Transcriber implements the Transcriber shape driven entirely by Config.
@@ -57,12 +62,12 @@ func (t *Transcriber) Available(ctx context.Context) error {
 // distinct jobs produce distinguishable (but always reproducible) text
 // without ever touching whisper.cpp. It honours Options.WordTimestamps
 // (per-word timings on each segment, or none at all). It follows the same
-// language rule as the real engine (domain.PlanOutput): the fake "detects"
-// English when Options.Language is empty, Spanish and English audio keep
-// their language, and audio in any other language (set with an
-// Options.Language hint) is "translated": the text gets a prefix, matching
-// the shape of what a real translation would look like without pretending
-// to translate anything. Options.Task plays no part.
+// language rule as the real engine (domain.PlanOutput): the language of the
+// audio is Config.DetectedLanguage ("en" when empty), Spanish and English
+// audio keep their language, and audio in any other language is
+// "translated": the text gets a prefix, matching the shape of what a real
+// translation would look like without pretending to translate anything.
+// Neither Options.Language nor Options.Task plays any part.
 func (t *Transcriber) Transcribe(ctx context.Context, req domain.TranscribeRequest) (*domain.Result, error) {
 	if err := waitOrCancel(ctx, t.cfg.Delay); err != nil {
 		return nil, domain.Wrap(classifyCtxErr(err), "fake: transcribe canceled during delay", err)
@@ -72,8 +77,8 @@ func (t *Transcriber) Transcribe(ctx context.Context, req domain.TranscribeReque
 	}
 
 	base := basenameWithoutExt(req.AudioPath)
-	lang := req.Options.Language
-	if req.Options.AutoDetectLanguage() {
+	lang := t.cfg.DetectedLanguage
+	if lang == "" {
 		lang = domain.LanguageEnglish
 	}
 	plan := domain.PlanOutput(lang)

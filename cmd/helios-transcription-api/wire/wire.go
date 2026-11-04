@@ -247,7 +247,7 @@ func Build(ctx context.Context, cfg *config.Config, opts ...Option) (stack *Stac
 		MinFreeBytes: minFreeBytes,
 	})
 
-	s.Transcriber = buildTranscriber(cfg.Transcriber, built.transcriber)
+	s.Transcriber = buildTranscriber(cfg.Transcriber, cfg.Audio.FFmpegBinary, s.Logger, built.transcriber)
 
 	dbStore := postgres.New(s.DB)
 
@@ -351,8 +351,9 @@ func Build(ctx context.Context, cfg *config.Config, opts ...Option) (stack *Stac
 // implementation cfg.Kind names. cfg.Kind is assumed already validated to
 // be "whispercpp" or "fake" (config.Config.Validate enforces this before
 // Build ever sees cfg), so the default case below is whispercpp's, not a
-// third, unrecognised kind.
-func buildTranscriber(cfg config.TranscriberConfig, override app.Transcriber) app.Transcriber {
+// third, unrecognised kind. ffmpegBinary and logger serve the language
+// detection of the whispercpp implementation.
+func buildTranscriber(cfg config.TranscriberConfig, ffmpegBinary string, logger *slog.Logger, override app.Transcriber) app.Transcriber {
 	if override != nil {
 		return override
 	}
@@ -361,6 +362,8 @@ func buildTranscriber(cfg config.TranscriberConfig, override app.Transcriber) ap
 	}
 	return whispercpp.New(whispercpp.Config{
 		Binary:           cfg.Binary,
+		FFmpegBinary:     ffmpegBinary,
+		Logger:           logger,
 		ModelDir:         cfg.ModelDir,
 		DefaultModel:     cfg.DefaultModel,
 		TranslationModel: cfg.TranslationModel,

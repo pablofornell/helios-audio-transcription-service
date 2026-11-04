@@ -611,8 +611,8 @@ components:
         The service sets the output language itself. It detects the audio language
         before it transcribes. Spanish audio gives a Spanish transcript. English
         audio gives an English transcript. Audio in any other language gives an
-        English transcript, translated. Neither `language` nor `task` changes
-        this rule.
+        English transcript, translated. The service accepts `language` and `task`
+        for compatibility and ignores both: neither changes this rule.
       properties:
         model:
           type: string
@@ -623,11 +623,11 @@ components:
         language:
           type: string
           description: >
-            Optional hint for the language spoken in the audio: an ISO-639-1/639-2
-            code (2-3 lowercase letters). Empty or "auto" means auto-detect. A
-            hint skips detection. It does not set the output language: a hint of
-            "es" gives Spanish text and never a translation, a hint of "fr" gives
-            English text.
+            Accepted for compatibility. The service ignores it. It always detects
+            the language spoken in the audio, and the detection alone sets the
+            output language. A hint of "fr" on Spanish audio still gives a Spanish
+            transcript. If sent, it is an ISO-639-1/639-2 code (2-3 lowercase
+            letters), or empty or "auto".
         task:
           allOf:
             - $ref: "#/components/schemas/Task"
@@ -731,7 +731,7 @@ components:
           description: Every Segment's text, space-normalized and joined.
         language:
           type: string
-          description: Language spoken in the audio. It is the detected code, or the Options.language hint when one was given.
+          description: Language spoken in the audio, as the service detected it. The Options.language hint plays no part.
         outputLanguage:
           type: string
           description: >

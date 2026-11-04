@@ -433,9 +433,17 @@ func (c *Config) Validate() error {
 	}
 	// Empty is allowed: a Config built by hand (not by Load) then gets the
 	// transcriber's own default.
-	if c.Transcriber.TranslationModel != "" && !translationModelPattern.MatchString(c.Transcriber.TranslationModel) {
-		return fmt.Errorf("config: transcriber translation model %q must be a model name (lowercase letters, digits, '.', '_' or '-')",
-			c.Transcriber.TranslationModel)
+	if c.Transcriber.TranslationModel != "" {
+		if !translationModelPattern.MatchString(c.Transcriber.TranslationModel) {
+			return fmt.Errorf("config: transcriber translation model %q must be a model name (lowercase letters, digits, '.', '_' or '-')",
+				c.Transcriber.TranslationModel)
+		}
+		// A turbo model returns the original language under -tr, so it can
+		// not translate. Refuse it here, not at the first third-language job.
+		if strings.Contains(c.Transcriber.TranslationModel, "turbo") {
+			return fmt.Errorf("config: transcriber translation model %q is a turbo model; turbo models cannot translate, use a non-turbo model such as %q",
+				c.Transcriber.TranslationModel, DefaultTranslationModel)
+		}
 	}
 	if c.Audio.Timeout+c.Transcriber.Timeout >= c.Worker.JobTimeout {
 		return fmt.Errorf("config: audio timeout (%s) + transcriber timeout (%s) must be less than worker job timeout (%s)",

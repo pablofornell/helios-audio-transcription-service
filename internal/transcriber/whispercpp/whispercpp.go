@@ -20,19 +20,26 @@
 // package correct if a future whisper.cpp release changes its convention
 // or a differently-built vocab file introduces such a token.
 //
-// Transcribe runs two whisper-cli processes when the caller gives no
-// language hint. The first one detects the language (-dl, see
-// detectLanguage); domain.PlanOutput turns the result into the output
-// language; the second one transcribes or translates. -dl and -tr were
+// Transcribe always detects the audio language first (one or more
+// whisper-cli -dl runs, see detectLanguage). domain.PlanOutput turns the
+// result into the output language. A last whisper-cli run transcribes or
+// translates. A language hint in the request plays no part. -dl and -tr were
 // checked on the v1.9.4 tag: both exist, and -dl prints
 // "auto-detected language: <code> (p = <prob>)" on stderr.
 package whispercpp
 
-import "time"
+import (
+	"log/slog"
+	"time"
+)
 
 // DefaultBinary is the executable name used when Config.Binary is empty,
 // resolved via the process's PATH.
 const DefaultBinary = "whisper-cli"
+
+// DefaultFFmpegBinary is the ffmpeg name used when Config.FFmpegBinary is
+// empty, resolved via the process's PATH.
+const DefaultFFmpegBinary = "ffmpeg"
 
 // defaultThreads and defaultTimeout are used when the corresponding Config
 // field is zero or negative, mirroring BLUEPRINT ytdlp.New's defaulting
@@ -52,6 +59,13 @@ type Config struct {
 	// Binary is the whisper-cli executable: an absolute path, or a name
 	// resolved via PATH. Defaults to DefaultBinary.
 	Binary string
+	// FFmpegBinary is the ffmpeg executable the language detection uses to
+	// cut a clip out of the audio (see detectLanguage). Defaults to
+	// DefaultFFmpegBinary. The runtime image already has ffmpeg for the
+	// audio conversion.
+	FFmpegBinary string
+	// Logger receives the detection log lines. Defaults to slog.Default().
+	Logger *slog.Logger
 	// ModelDir holds the ggml-<model>.bin weight files. See modelPath.
 	ModelDir string
 	// DefaultModel is the model Available checks actually exists on disk
@@ -99,6 +113,12 @@ type Transcriber struct {
 func New(cfg Config) *Transcriber {
 	if cfg.Binary == "" {
 		cfg.Binary = DefaultBinary
+	}
+	if cfg.FFmpegBinary == "" {
+		cfg.FFmpegBinary = DefaultFFmpegBinary
+	}
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
 	}
 	if cfg.TranslationModel == "" {
 		cfg.TranslationModel = DefaultTranslationModel

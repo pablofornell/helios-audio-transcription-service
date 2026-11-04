@@ -187,14 +187,21 @@ transcribes, then applies one rule:
 | English (`en`) | English. | `large-v3-turbo-q5_0` |
 | Any other language | English, translated. | `large-v3-q5_0` |
 
-`options.language` is an optional hint for the audio language. A hint skips
-detection but does not choose the output: a hint of `es` gives Spanish text, a hint of
-`fr` gives English text. `options.task` is still accepted but ignored: `task=translate`
-on Spanish audio gives a Spanish transcript. The `result` carries `language` (the
+`options.language` and `options.task` are still accepted but ignored. The service
+always detects the audio language and the detection alone sets the output: a request
+with `language: "fr"` on Spanish audio gives a Spanish transcript, and `task=translate`
+on Spanish audio also gives a Spanish transcript. The `result` carries `language` (the
 language of the audio), `outputLanguage` (the language of `text`), `model` (the model
-that produced the text) and `task` (what the engine did). Detection reads the first
-30 seconds of audio, so a file that changes language later keeps the language of its
-start. Detection loads the model once more, so each job takes a few seconds longer.
+that produced the text) and `task` (what the engine did).
+
+Detection works on a clip of up to 30 seconds (the most `whisper-cli` reads) from which
+the leading silence is removed with `ffmpeg`. If the probability of the answer is low
+(under 0.5), the service also tries clips at one third and two thirds of the audio and
+keeps the most probable answer. It never fails a job for low confidence, because audio
+without speech is valid. The log line `whispercpp: language detected` shows the chosen
+language, its probability and the window. Audio that changes language later than these
+windows keeps the language of the part the service detected. Detection loads the model
+once or more before the transcription, so each job takes a few seconds longer.
 
 **Speaker diarization is out of scope.** ATS produces segments and, optionally,
 word-level timestamps — never speaker labels. There is also no authentication layer:

@@ -19,34 +19,6 @@ const MODEL_OPTIONS = [
   { value: SUPPORTED_MODEL, label: SUPPORTED_MODEL },
 ];
 
-// Optional hint for the language spoken in the audio. A hint skips language
-// detection; it does not choose the output language: the service always
-// transcribes Spanish audio in Spanish and gives English for all other audio.
-// ISO-639-1/639-2 codes domain.Options.Validate accepts (2-3 lowercase
-// letters) — a representative set of whisper.cpp's supported languages,
-// not an exhaustive one. "" is "Auto-detect" (domain.Options.AutoDetectLanguage).
-const LANGUAGE_OPTIONS = [
-  { value: "", label: "Auto-detect" },
-  { value: "en", label: "English" },
-  { value: "es", label: "Spanish" },
-  { value: "fr", label: "French" },
-  { value: "de", label: "German" },
-  { value: "it", label: "Italian" },
-  { value: "pt", label: "Portuguese" },
-  { value: "nl", label: "Dutch" },
-  { value: "ru", label: "Russian" },
-  { value: "zh", label: "Chinese" },
-  { value: "ja", label: "Japanese" },
-  { value: "ko", label: "Korean" },
-  { value: "ar", label: "Arabic" },
-  { value: "hi", label: "Hindi" },
-  { value: "tr", label: "Turkish" },
-  { value: "pl", label: "Polish" },
-  { value: "sv", label: "Swedish" },
-  { value: "uk", label: "Ukrainian" },
-  { value: "vi", label: "Vietnamese" },
-];
-
 /** Base name of a filesystem path, tolerant of both `/` and `\` separators (a dropped OS path can carry either, depending on platform). */
 function basename(path: string): string {
   const parts = path.split(/[/\\]/);
@@ -55,7 +27,8 @@ function basename(path: string): string {
 
 /**
  * The composer — a drop zone + file picker, plus the real transcription
- * options (model, audio language hint, word timestamps). One component, two
+ * options (model, word timestamps). There is no language control: the
+ * service detects the audio language itself and ignores any hint. One component, two
  * layouts: `expanded` (first run, fills the surface) and `collapsed` (a
  * docked bar once a row exists) share every field, handler and piece of
  * state below; only the surrounding chrome differs, so the two can never
@@ -216,10 +189,6 @@ export function Composer({ variant, submit }: ComposerProps) {
       <div className={styles.optionGroup}>
         <span className={styles.optionLabel}>Model</span>
         <Select label="Model" options={MODEL_OPTIONS} value={options.model} onChange={(v) => setOptions({ ...options, model: v })} />
-      </div>
-      <div className={styles.optionGroup}>
-        <span className={styles.optionLabel}>Audio language</span>
-        <Select label="Audio language" options={LANGUAGE_OPTIONS} value={options.language} onChange={(v) => setOptions({ ...options, language: v })} />
       </div>
       <Switch
         label="Word timestamps"

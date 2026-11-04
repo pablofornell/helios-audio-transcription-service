@@ -94,53 +94,36 @@ describe("supported transcription model", () => {
   });
 
   it("submits with the default after restoring a retired saved model", () => {
-    localStorage.setItem("helios.transcribe.composerOptions", JSON.stringify({ model: "base", language: "en" }));
+    localStorage.setItem("helios.transcribe.composerOptions", JSON.stringify({ model: "base", wordTimestamps: true }));
     const submit = vi.fn().mockResolvedValue({ ok: true, id: "accepted" });
     const { container } = render(<Composer variant="collapsed" submit={submit} />);
     upload(container, "turbo.wav");
-    expect(submit).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ model: "", language: "en" }));
+    expect(submit).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ model: "", wordTimestamps: true }));
   });
 });
 
 
-describe("audio language hint", () => {
-  it("has no Translate choice and no Task control", () => {
+describe("language detection", () => {
+  it("has no Translate choice, no Task control and no language control", () => {
     render(<Composer variant="expanded" submit={vi.fn()} />);
     expect(screen.queryByText(/translate/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole("radiogroup", { name: "Task" })).not.toBeInTheDocument();
     expect(screen.queryByText("Task")).not.toBeInTheDocument();
+    expect(screen.queryByText(/language/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /language/i })).not.toBeInTheDocument();
   });
 
-  it("offers auto-detect first, then source languages", () => {
-    render(<Composer variant="expanded" submit={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Audio language" }));
-    const labels = screen.getAllByRole("option").map((option) => option.textContent);
-    expect(labels[0]).toBe("Auto-detect");
-    expect(labels).toContain("Spanish");
-    expect(labels).toContain("French");
-  });
-
-  it("submits no hint and task transcribe by default, so the server detects the language", () => {
+  it("submits an empty language and task transcribe, so the server detects the language", () => {
     const submit = vi.fn().mockResolvedValue({ ok: true, id: "accepted" });
     const { container } = render(<Composer variant="collapsed" submit={submit} />);
     upload(container, "speech.wav");
     expect(submit).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ language: "", task: "transcribe" }));
   });
 
-  it("submits a chosen hint as the language and still sends task transcribe", () => {
-    const submit = vi.fn().mockResolvedValue({ ok: true, id: "accepted" });
-    const { container } = render(<Composer variant="collapsed" submit={submit} />);
-    fireEvent.click(screen.getByRole("button", { name: "Audio language" }));
-    fireEvent.click(screen.getByRole("option", { name: "French" }));
-    upload(container, "speech.wav");
-    expect(submit).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ language: "fr", task: "transcribe" }));
-  });
-
-  it("does not send a saved translate task", () => {
+  it("does not send a language or a task saved by an older version", () => {
     localStorage.setItem("helios.transcribe.composerOptions", JSON.stringify({ language: "es", task: "translate" }));
     const submit = vi.fn().mockResolvedValue({ ok: true, id: "accepted" });
     const { container } = render(<Composer variant="collapsed" submit={submit} />);
     upload(container, "speech.wav");
-    expect(submit).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ language: "es", task: "transcribe" }));
+    expect(submit).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ language: "", task: "transcribe" }));
   });
 });

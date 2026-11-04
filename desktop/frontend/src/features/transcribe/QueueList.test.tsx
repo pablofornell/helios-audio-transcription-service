@@ -27,6 +27,11 @@ function renderRows(rows: QueueRowModel[], extra: Partial<ComponentProps<typeof 
   render(<QueueList rows={rows} loading={false} connectionStale={false} isCanceling={() => false}
     isEntering={() => false} cancel={vi.fn()} retry={vi.fn()} clearFinished={vi.fn()} libraryCount={0} {...extra} />);
 }
+const failedWith = (id: string, code: "model_unavailable" | "disk_full"): QueueRowModel => {
+  const base = row(id, "failed", "2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z");
+  if (base.kind !== "real") throw new Error("expected a real row");
+  return { ...base, transcription: { ...base.transcription, error: { code, message: "needs `make models`, then retry the job" } } };
+};
 const names = (label: string) => within(screen.getByRole("list", { name: label })).getAllByRole("listitem")
   .map((item) => item.querySelector("[id$='-title']")?.textContent);
 describe("queue rendered order", () => {
@@ -126,5 +131,18 @@ describe("removing a row", () => {
     await remove();
     await vi.waitFor(() => expect(mocks.toast).toHaveBeenCalledTimes(1));
     expect(mocks.forget).not.toHaveBeenCalled();
+  });
+});
+
+describe("retry control", () => {
+  it("offers a manual Retry for a failed model_unavailable row and calls retry with its id", () => {
+    const retry = vi.fn();
+    renderRows([failedWith("missing-model", "model_unavailable")], { retry });
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retry).toHaveBeenCalledWith("missing-model");
+  });
+  it("offers no Retry for a failed disk_full row", () => {
+    renderRows([failedWith("full", "disk_full")]);
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
 });

@@ -104,19 +104,22 @@ export function languageName(code: string): string {
 /**
  * The language line of a job. For a finished job it shows the language the
  * service detected in the audio and, when it differs, the language of the
- * transcript: "French → English". The requested language is only a hint, so
- * it appears only while no result exists yet ("auto-detect" when none was
- * given). A result stored before `outputLanguage` existed shows only the
- * detected language.
+ * transcript: "French → English". Before a result exists the service has not
+ * detected anything yet, and it ignores any language hint in the request, so
+ * the line says "auto-detect".
+ *
+ * A result stored before `outputLanguage` existed has no output language. If
+ * its task was "translate", its text is English, so the line still shows
+ * "→ English" (an old row with a French hint and a translate task shows
+ * "French → English", not "French").
  */
-export function formatLanguages(transcription: Pick<Transcription, "options" | "result">): string {
+export function formatLanguages(transcription: Pick<Transcription, "result">): string {
   const result = transcription.result;
-  if (result?.language) {
-    const detected = languageName(result.language);
-    if (result.outputLanguage && result.outputLanguage !== result.language) {
-      return `${detected} → ${languageName(result.outputLanguage)}`;
-    }
-    return detected;
+  if (!result?.language) return "auto-detect";
+  const detected = languageName(result.language);
+  const output = result.outputLanguage || (result.task === "translate" ? "en" : "");
+  if (output && output !== result.language) {
+    return `${detected} → ${languageName(output)}`;
   }
-  return transcription.options.language ? languageName(transcription.options.language) : "auto-detect";
+  return detected;
 }

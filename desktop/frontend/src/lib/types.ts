@@ -87,7 +87,7 @@ export type ErrorCode =
 export interface Options {
   /** Whisper model name, "large-v3-turbo-q5_0". Empty means the configured default. */
   model: string;
-  /** Optional hint for the audio language (ISO-639-1/639-2 code). Empty means auto-detect. A hint skips detection; it does not set the output language. */
+  /** Accepted for compatibility and ignored: the service always detects the audio language itself. The composer sends it empty. */
   language: string;
   /** Sent for compatibility. The service ignores it. */
   task: Task;

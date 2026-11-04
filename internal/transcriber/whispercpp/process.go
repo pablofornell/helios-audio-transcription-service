@@ -70,16 +70,19 @@ type runResult struct {
 // cancellation or Config.Timeout, and captures a bounded stderr tail —
 // mirroring BLUEPRINT ytdlp's process.go and internal/audio's process.go.
 func (t *Transcriber) run(ctx context.Context, args []string) runResult {
-	return t.runTee(ctx, args, nil)
+	return t.runTee(ctx, t.cfg.Binary, args, nil)
 }
 
-// runTee is run, and it also writes every byte of stderr to tee when tee is
-// not nil. The bounded tail in runResult.Stderr stays the same.
-func (t *Transcriber) runTee(ctx context.Context, args []string, tee io.Writer) runResult {
+// runTee is run for any binary (whisper-cli, or ffmpeg for the detection
+// clips). It also writes every byte of stderr to tee when tee is not nil.
+// The bounded tail in runResult.Stderr stays the same. The process limits
+// are the same for every binary: Config.Timeout, the caller's ctx, and a
+// kill of the whole process group.
+func (t *Transcriber) runTee(ctx context.Context, binary string, args []string, tee io.Writer) runResult {
 	runCtx, cancel := context.WithTimeout(ctx, t.cfg.Timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, t.cfg.Binary, args...)
+	cmd := exec.CommandContext(runCtx, binary, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.WaitDelay = waitDelay
 	cmd.Cancel = func() error {

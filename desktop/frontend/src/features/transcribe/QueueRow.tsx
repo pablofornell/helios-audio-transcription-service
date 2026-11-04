@@ -239,7 +239,7 @@ function PrimaryAction({ transcription, status, onCancel, onRetry }: PrimaryActi
   if (status === "canceling") {
     return <IconButton icon={<CancelGlyph />} label="Canceling…" disabled onDoubleClick={stopDoubleClick} />;
   }
-  if (status === "failed" && errorCopyFor(transcription.error?.code).retryable) {
+  if (status === "failed" && errorCopyFor(transcription.error?.code).canRetry) {
     return <IconButton icon={<RetryGlyph />} label="Retry" onClick={() => onRetry(transcription.id)} onDoubleClick={stopDoubleClick} />;
   }
   return null;
@@ -262,7 +262,7 @@ function RowMenu({ transcription, status, onRetry, onRemove, onOpenLibrary, ctxM
   if (onOpenLibrary) {
     items.push({ id: "library", label: "View in Library", onSelect: () => onOpenLibrary(transcription.id) });
   }
-  if (status === "failed" && errorCopyFor(transcription.error?.code).retryable) {
+  if (status === "failed" && errorCopyFor(transcription.error?.code).canRetry) {
     items.push({ id: "retry", label: "Retry", onSelect: () => onRetry(transcription.id) });
   }
   if (isTerminalStatus(transcription.status)) {

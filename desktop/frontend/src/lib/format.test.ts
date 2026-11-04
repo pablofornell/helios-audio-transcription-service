@@ -48,30 +48,33 @@ describe("formatDuration", () => {
 });
 
 describe("formatLanguages", () => {
-  const options = { model: "", language: "", task: "transcribe" as const, wordTimestamps: false, initialPrompt: "", beamSize: 5, temperature: 0 };
-  const result = (language: string, outputLanguage?: string): Transcription["result"] =>
-    ({ text: "", language, outputLanguage, durationSeconds: 1, model: "m", task: "transcribe", segments: [] });
+  const result = (language: string, outputLanguage?: string, task: "transcribe" | "translate" = "transcribe"): Transcription["result"] =>
+    ({ text: "", language, outputLanguage, durationSeconds: 1, model: "m", task, segments: [] });
 
   it("shows detected and output language for a translated job", () => {
-    expect(formatLanguages({ options, result: result("fr", "en") })).toBe("French → English");
+    expect(formatLanguages({ result: result("fr", "en", "translate") })).toBe("French → English");
   });
 
   it("shows one language when audio and transcript match", () => {
-    expect(formatLanguages({ options, result: result("es", "es") })).toBe("Spanish");
-    expect(formatLanguages({ options, result: result("en", "en") })).toBe("English");
+    expect(formatLanguages({ result: result("es", "es") })).toBe("Spanish");
+    expect(formatLanguages({ result: result("en", "en") })).toBe("English");
   });
 
-  it("shows only the detected language for a result stored without outputLanguage", () => {
-    expect(formatLanguages({ options, result: result("en") })).toBe("English");
+  it("shows only the detected language for an old transcribe result without outputLanguage", () => {
+    expect(formatLanguages({ result: result("en") })).toBe("English");
+    expect(formatLanguages({ result: result("es") })).toBe("Spanish");
   });
 
-  it("prefers the detected language over the requested hint", () => {
-    expect(formatLanguages({ options: { ...options, language: "de" }, result: result("fr", "en") })).toBe("French → English");
+  it("shows the English output of an old translate result without outputLanguage", () => {
+    expect(formatLanguages({ result: result("fr", undefined, "translate") })).toBe("French → English");
   });
 
-  it("shows the hint, or auto-detect, while there is no result", () => {
-    expect(formatLanguages({ options, result: undefined })).toBe("auto-detect");
-    expect(formatLanguages({ options: { ...options, language: "fr" }, result: undefined })).toBe("French");
+  it("shows no arrow for an old translate result whose audio was English", () => {
+    expect(formatLanguages({ result: result("en", undefined, "translate") })).toBe("English");
+  });
+
+  it("shows auto-detect while there is no result", () => {
+    expect(formatLanguages({ result: undefined })).toBe("auto-detect");
   });
 });
 

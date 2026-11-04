@@ -206,7 +206,7 @@ func TestValidate_TranslationModel(t *testing.T) {
 		assert.NotEqual(t, SupportedModel, cfg.Transcriber.TranslationModel)
 		assert.NoError(t, cfg.Validate())
 	})
-	for _, bad := range []string{"../x", "a/b", "Large V3"} {
+	for _, bad := range []string{"../x", "a/b", "Large V3", SupportedModel, "large-v3-turbo", "large-v3-turbo-q8_0"} {
 		t.Run("rejects "+bad, func(t *testing.T) {
 			cfg := validConfig()
 			cfg.Transcriber.TranslationModel = bad

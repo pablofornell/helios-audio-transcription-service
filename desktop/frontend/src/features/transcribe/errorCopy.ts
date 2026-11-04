@@ -13,16 +13,29 @@ import type { ErrorCode } from "../../lib";
  * this API's wire enum actually includes out of that function's three
  * (its third, `network`, is classified only on the Go http client's own
  * side and never appears in a stored `Transcription.error`).
+ *
+ * `canRetry` is a different question: does the row get a manual Retry
+ * control? It is true when `retryable` is true, and also for
+ * model_unavailable. The server never retries that code by itself (a
+ * missing model file does not appear on its own), but an operator fixes it
+ * with `make models`, and then a manual retry works: the server re-queues
+ * any failed row, whatever its code.
  */
 export type ErrorTone = "neutral" | "amber" | "red";
 
 export interface ErrorCopy {
   headline: string;
   tone: ErrorTone;
+  /** The server retries this code by itself. */
   retryable: boolean;
+  /** The row has a manual Retry control. */
+  canRetry: boolean;
 }
 
-const ERROR_COPY: Record<ErrorCode, ErrorCopy> = {
+/** Error codes that get a manual Retry control although the server never retries them by itself. */
+const MANUAL_RETRY_ONLY: ErrorCode[] = ["model_unavailable"];
+
+const ERROR_COPY: Record<ErrorCode, Omit<ErrorCopy, "canRetry">> = {
   invalid_input: { headline: "The request was rejected as invalid", tone: "neutral", retryable: false },
   unsupported_media: { headline: "whisper.cpp's decoder couldn't read this file", tone: "neutral", retryable: false },
   no_audio_stream: { headline: "This file has no audio track", tone: "neutral", retryable: false },
@@ -30,7 +43,7 @@ const ERROR_COPY: Record<ErrorCode, ErrorCopy> = {
   not_found: { headline: "This transcription is gone", tone: "neutral", retryable: false },
   conflict: { headline: "This item changed elsewhere", tone: "neutral", retryable: false },
   disk_full: { headline: "Out of disk space on the server", tone: "red", retryable: false },
-  model_unavailable: { headline: "The requested whisper model isn't installed", tone: "red", retryable: false },
+  model_unavailable: { headline: "A whisper model this file needs isn't installed", tone: "red", retryable: false },
   tool_failure: { headline: "whisper.cpp failed on this one", tone: "amber", retryable: true },
   timeout: { headline: "Took too long and was stopped", tone: "amber", retryable: true },
   // Never reach a row per docs/openapi.yaml's table (handled inline at
@@ -41,10 +54,12 @@ const ERROR_COPY: Record<ErrorCode, ErrorCopy> = {
   media_unavailable: { headline: "No local copy of this file is available", tone: "neutral", retryable: false },
 };
 
-const FALLBACK: ErrorCopy = { headline: "Something went wrong", tone: "red", retryable: false };
+const FALLBACK: ErrorCopy = { headline: "Something went wrong", tone: "red", retryable: false, canRetry: false };
 
 /** Looks up headline/tone/retryability for a transcription's `error.code`, falling back gracefully for an unrecognised or absent code. */
 export function errorCopyFor(code: ErrorCode | null | undefined): ErrorCopy {
   if (!code) return FALLBACK;
-  return ERROR_COPY[code] ?? FALLBACK;
+  const copy = ERROR_COPY[code];
+  if (!copy) return FALLBACK;
+  return { ...copy, canRetry: copy.retryable || MANUAL_RETRY_ONLY.includes(code) };
 }

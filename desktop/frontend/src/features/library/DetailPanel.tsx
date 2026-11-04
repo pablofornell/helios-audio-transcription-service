@@ -263,7 +263,7 @@ export function DetailPanel({ transcription, onClose, onRetry, onSaveAs, onDelet
                 {transcription.error?.message ? <p className={styles.reasonBody}>{transcription.error.message}</p> : null}
                 <span className={["num", styles.reasonCode].join(" ")}>{transcription.error?.code ?? "unknown"}</span>
                 <div className={styles.reasonActions}>
-                  {errorCopy.retryable ? (
+                  {errorCopy.canRetry ? (
                     <Button variant="neutral" size="sm" loading={retrying} onClick={handleRetry}>
                       Try again
                     </Button>
