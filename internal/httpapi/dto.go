@@ -10,6 +10,10 @@ import (
 // than marshaling domain.Options directly -- so the wire shape of every
 // resource this package serves is declared once, here, independent of
 // whatever internal/domain happens to look like.
+//
+// Language is only a hint for the audio language. Task is accepted for
+// compatibility and ignored: the service sets the output language itself
+// (see domain.PlanOutput).
 type optionsDTO struct {
 	Model          string      `json:"model"`
 	Language       string      `json:"language"`
@@ -93,6 +97,7 @@ type segmentDTO struct {
 type resultDTO struct {
 	Text            string       `json:"text"`
 	Language        string       `json:"language"`
+	OutputLanguage  string       `json:"outputLanguage,omitempty"`
 	DurationSeconds float64      `json:"durationSeconds"`
 	Model           string       `json:"model"`
 	Task            domain.Task  `json:"task"`
@@ -120,6 +125,7 @@ func resultFromDomain(r *domain.Result) *resultDTO {
 	return &resultDTO{
 		Text:            r.Text,
 		Language:        r.Language,
+		OutputLanguage:  r.OutputLanguage,
 		DurationSeconds: r.DurationSeconds,
 		Model:           r.Model,
 		Task:            r.Task,

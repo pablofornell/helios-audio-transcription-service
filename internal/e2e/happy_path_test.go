@@ -155,25 +155,46 @@ func TestWordTimestamps(t *testing.T) {
 	}
 }
 
-// TestTranslateTask submits with task:translate and asserts it is honoured
-// end to end: the persisted Result.Task is translate, and the fake
-// transcriber's own translate-shaped output (a "Translated: " prefix --
-// see internal/transcriber/fake's Transcribe doc) made it all the way back
-// through the API.
-func TestTranslateTask(t *testing.T) {
+// TestThirdLanguageIsTranslated submits audio with a French language hint
+// and asserts the language rule end to end: the persisted Result.Task is
+// translate and the output language is English, and the fake transcriber's
+// own translate-shaped output (a "Translated: " prefix -- see
+// internal/transcriber/fake's Transcribe doc) made it all the way back
+// through the API. The submitted task is stored as sent but plays no part.
+func TestThirdLanguageIsTranslated(t *testing.T) {
 	requireDocker(t)
 	requireFFmpeg(t)
 
 	ts := newTestServer(t)
 
-	opts := &domain.Options{Task: domain.TaskTranslate}
+	opts := &domain.Options{Language: "fr", Task: domain.TaskTranscribe}
 	created := submitFile(t, ts.base, fixtureGoodMP3, "audio/mpeg", opts)
-	assert.Equal(t, domain.TaskTranslate, created.Options.Task, "expected the submitted task to be echoed back immediately")
+	assert.Equal(t, domain.TaskTranscribe, created.Options.Task, "expected the submitted task to be echoed back immediately")
 
 	final := waitForStatus(t, ts.base, created.ID, domain.StatusSucceeded, terminalDeadline)
 	require.NotNil(t, final.Result)
 	assert.Equal(t, domain.TaskTranslate, final.Result.Task)
+	assert.Equal(t, "fr", final.Result.Language)
+	assert.Equal(t, "en", final.Result.OutputLanguage)
 	assert.Contains(t, final.Result.Text, "Translated:", "expected the fake transcriber's translate-shaped output")
+}
+
+// TestSpanishIsNeverTranslated submits Spanish audio with task:translate and
+// asserts the transcript stays Spanish.
+func TestSpanishIsNeverTranslated(t *testing.T) {
+	requireDocker(t)
+	requireFFmpeg(t)
+
+	ts := newTestServer(t)
+
+	opts := &domain.Options{Language: "es", Task: domain.TaskTranslate}
+	created := submitFile(t, ts.base, fixtureGoodMP3, "audio/mpeg", opts)
+
+	final := waitForStatus(t, ts.base, created.ID, domain.StatusSucceeded, terminalDeadline)
+	require.NotNil(t, final.Result)
+	assert.Equal(t, domain.TaskTranscribe, final.Result.Task)
+	assert.Equal(t, "es", final.Result.OutputLanguage)
+	assert.NotContains(t, final.Result.Text, "Translated:")
 }
 
 // TestOptionsDefaults submits with NO options part at all -- guarding

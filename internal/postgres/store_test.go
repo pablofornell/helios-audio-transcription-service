@@ -158,7 +158,8 @@ func TestStore_CreateAndGet_RoundTrip(t *testing.T) {
 	// this test also pins their JSONB round trip, not just Options/Audio's.
 	result := &domain.Result{
 		Text:            "hello there general kenobi",
-		Language:        "en",
+		Language:        "fr",
+		OutputLanguage:  "en",
 		DurationSeconds: 3.2,
 		Model:           "small",
 		Task:            domain.TaskTranslate,

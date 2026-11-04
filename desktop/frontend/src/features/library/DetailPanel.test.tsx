@@ -130,7 +130,18 @@ it("keeps historical model names and completed transcripts accessible", async ()
   vi.mocked(transcript).mockResolvedValueOnce("Historical transcript");
   render(panel(legacy));
   expect(await screen.findByText("Historical transcript")).toBeInTheDocument();
-  expect(screen.getByText("Transcribe · base · auto-detect")).toBeInTheDocument();
+  expect(screen.getByText("base · English")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Save as…" })).toBeEnabled();
   expect(screen.getByRole("button", { name: "Download audio" })).toBeEnabled();
+});
+
+it("shows the detected and the output language, not the requested one", async () => {
+  const translated: Transcription = {
+    ...row, status: "succeeded", options: { ...row.options, language: "de" },
+    result: { text: "Hello", language: "fr", outputLanguage: "en", model: "large-v3-q5_0", task: "translate", durationSeconds: 1, segments: [] },
+  };
+  vi.mocked(transcript).mockResolvedValueOnce("Hello");
+  render(panel(translated));
+  expect(await screen.findByText("large-v3-q5_0 · French → English")).toBeInTheDocument();
+  expect(screen.queryByText(/German/)).not.toBeInTheDocument();
 });

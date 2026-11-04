@@ -33,15 +33,21 @@ type Result struct {
 	// Text is the full transcript: every Segment's Text, space-normalized
 	// and joined.
 	Text string `json:"text"`
-	// Language is the detected (Options.AutoDetectLanguage true) or forced
-	// ISO-639-1 code whisper-cli actually used.
-	Language        string  `json:"language"`
+	// Language is the language spoken in the audio: the detected code
+	// (Options.AutoDetectLanguage true) or the code the caller gave as a
+	// hint.
+	Language string `json:"language"`
+	// OutputLanguage is the language of Text: "es" for Spanish audio, "en"
+	// for all other audio (see PlanOutput). Empty on a Result stored
+	// before this field existed.
+	OutputLanguage  string  `json:"outputLanguage,omitempty"`
 	DurationSeconds float64 `json:"durationSeconds"`
-	// Model is the whisper model name actually used, resolved from
-	// Options.Model or the configured default.
+	// Model is the whisper model name actually used to produce Text. It is
+	// the translation model when the engine translated.
 	Model string `json:"model"`
-	// Task is transcribe or translate, echoed from the request that
-	// produced this Result.
+	// Task is what the engine did: translate when it translated to
+	// English, otherwise transcribe. It follows PlanOutput, not the
+	// Options.Task of the request.
 	Task     Task      `json:"task"`
 	Segments []Segment `json:"segments"`
 }

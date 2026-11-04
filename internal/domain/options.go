@@ -38,10 +38,12 @@ type Options struct {
 	// Model is the whisper model name, "large-v3-turbo-q5_0". Empty means
 	// the configured default model.
 	Model string `json:"model"`
-	// Language is an ISO-639-1 code. Empty or "auto" means auto-detect.
+	// Language is an optional hint for the language spoken in the audio:
+	// an ISO-639-1 code. Empty or "auto" means auto-detect. A hint skips
+	// detection. It does not set the output language: see PlanOutput.
 	Language string `json:"language"`
-	// Task selects transcription in the source language or translation to
-	// English. See Task.
+	// Task is accepted for compatibility and ignored. The output language
+	// follows PlanOutput. See Task.
 	Task Task `json:"task"`
 	// WordTimestamps, when true, asks whisper-cli to emit per-word timings
 	// (its -ojf mode) instead of just per-segment ones.

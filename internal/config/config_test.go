@@ -32,13 +32,14 @@ func validConfig() *Config {
 			MinFreeBytes: giB,
 		},
 		Transcriber: TranscriberConfig{
-			Kind:          "whispercpp",
-			Binary:        "whisper-cli",
-			ModelDir:      "/models",
-			DefaultModel:  SupportedModel,
-			AllowedModels: []string{SupportedModel},
-			Threads:       4,
-			Timeout:       30 * time.Minute,
+			Kind:             "whispercpp",
+			Binary:           "whisper-cli",
+			ModelDir:         "/models",
+			DefaultModel:     SupportedModel,
+			AllowedModels:    []string{SupportedModel},
+			TranslationModel: DefaultTranslationModel,
+			Threads:          4,
+			Timeout:          30 * time.Minute,
 		},
 		Audio: AudioConfig{
 			FFmpegBinary:  "ffmpeg",
@@ -195,6 +196,23 @@ func TestValidate_DefaultModelMustBeInAllowedModels(t *testing.T) {
 		cfg.Transcriber.AllowedModels = nil
 		assert.Error(t, cfg.Validate())
 	})
+}
+
+// The translation model is not a request option, so it may differ from
+// SupportedModel. It must still be a safe file-name part.
+func TestValidate_TranslationModel(t *testing.T) {
+	t.Run("default is valid and is not the allowed model", func(t *testing.T) {
+		cfg := validConfig()
+		assert.NotEqual(t, SupportedModel, cfg.Transcriber.TranslationModel)
+		assert.NoError(t, cfg.Validate())
+	})
+	for _, bad := range []string{"../x", "a/b", "Large V3"} {
+		t.Run("rejects "+bad, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Transcriber.TranslationModel = bad
+			assert.Error(t, cfg.Validate())
+		})
+	}
 }
 
 // TestValidate_AllowedModelsMustNotBeEmpty is the review-confirmed finding:
@@ -457,6 +475,7 @@ func TestLoad_AllDefaults(t *testing.T) {
 	assert.Equal(t, "/models", cfg.Transcriber.ModelDir)
 	assert.Equal(t, SupportedModel, cfg.Transcriber.DefaultModel)
 	assert.Equal(t, []string{SupportedModel}, cfg.Transcriber.AllowedModels)
+	assert.Equal(t, "large-v3-q5_0", cfg.Transcriber.TranslationModel)
 	assert.Equal(t, 4, cfg.Transcriber.Threads)
 	assert.False(t, cfg.Transcriber.NoGPU)
 	assert.Equal(t, 0, cfg.Transcriber.GPUDevice)
@@ -650,6 +669,7 @@ func TestLoad_FullCustomEnvironment(t *testing.T) {
 		"HELIOS_TRANSCRIBER_MODEL_DIR":         "/srv/models",
 		"HELIOS_TRANSCRIBER_DEFAULT_MODEL":     SupportedModel,
 		"HELIOS_TRANSCRIBER_ALLOWED_MODELS":    SupportedModel,
+		"HELIOS_TRANSCRIBER_TRANSLATION_MODEL": "large-v3",
 		"HELIOS_TRANSCRIBER_THREADS":           "8",
 		"HELIOS_TRANSCRIBER_NO_GPU":            "true",
 		"HELIOS_TRANSCRIBER_GPU_DEVICE":        "2",
@@ -706,15 +726,16 @@ func TestLoad_FullCustomEnvironment(t *testing.T) {
 	}, cfg.Storage)
 
 	assert.Equal(t, TranscriberConfig{
-		Kind:          "fake",
-		Binary:        "/usr/local/bin/whisper-cli",
-		ModelDir:      "/srv/models",
-		DefaultModel:  SupportedModel,
-		AllowedModels: []string{SupportedModel},
-		Threads:       8,
-		NoGPU:         true,
-		GPUDevice:     2,
-		Timeout:       5 * time.Minute,
+		Kind:             "fake",
+		Binary:           "/usr/local/bin/whisper-cli",
+		ModelDir:         "/srv/models",
+		DefaultModel:     SupportedModel,
+		AllowedModels:    []string{SupportedModel},
+		TranslationModel: "large-v3",
+		Threads:          8,
+		NoGPU:            true,
+		GPUDevice:        2,
+		Timeout:          5 * time.Minute,
 	}, cfg.Transcriber)
 
 	assert.Equal(t, AudioConfig{

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
-import { EmptyState, Segmented, Select, Switch } from "../../components";
-import { chooseAudioFile, getServerSettingsVersion, useServerSettingsVersion, type AudioSource, type Options, type Task } from "../../lib";
+import { EmptyState, Select, Switch } from "../../components";
+import { chooseAudioFile, getServerSettingsVersion, useServerSettingsVersion, type AudioSource, type Options } from "../../lib";
 import { hasWailsRuntime } from "../../lib/runtime";
 import { SUPPORTED_MODEL, useComposerOptions } from "./useComposerOptions";
 import type { SubmitOutcome } from "./useTranscribeQueue";
@@ -12,11 +12,6 @@ export interface ComposerProps {
   submit: (source: AudioSource, options: Options) => Promise<SubmitOutcome>;
 }
 
-const TASK_OPTIONS: { value: Task; label: string }[] = [
-  { value: "transcribe", label: "Transcribe" },
-  { value: "translate", label: "Translate to English" },
-];
-
 // Empty Model uses the configured default; explicit selection uses the same
 // supported quantized turbo model.
 const MODEL_OPTIONS = [
@@ -24,6 +19,9 @@ const MODEL_OPTIONS = [
   { value: SUPPORTED_MODEL, label: SUPPORTED_MODEL },
 ];
 
+// Optional hint for the language spoken in the audio. A hint skips language
+// detection; it does not choose the output language: the service always
+// transcribes Spanish audio in Spanish and gives English for all other audio.
 // ISO-639-1/639-2 codes domain.Options.Validate accepts (2-3 lowercase
 // letters) — a representative set of whisper.cpp's supported languages,
 // not an exhaustive one. "" is "Auto-detect" (domain.Options.AutoDetectLanguage).
@@ -57,7 +55,7 @@ function basename(path: string): string {
 
 /**
  * The composer — a drop zone + file picker, plus the real transcription
- * options (model, language, task, word timestamps). One component, two
+ * options (model, audio language hint, word timestamps). One component, two
  * layouts: `expanded` (first run, fills the surface) and `collapsed` (a
  * docked bar once a row exists) share every field, handler and piece of
  * state below; only the surrounding chrome differs, so the two can never
@@ -220,12 +218,8 @@ export function Composer({ variant, submit }: ComposerProps) {
         <Select label="Model" options={MODEL_OPTIONS} value={options.model} onChange={(v) => setOptions({ ...options, model: v })} />
       </div>
       <div className={styles.optionGroup}>
-        <span className={styles.optionLabel}>Language</span>
-        <Select label="Language" options={LANGUAGE_OPTIONS} value={options.language} onChange={(v) => setOptions({ ...options, language: v })} />
-      </div>
-      <div className={styles.optionGroup}>
-        <span className={styles.optionLabel}>Task</span>
-        <Segmented label="Task" options={TASK_OPTIONS} value={options.task} onChange={(v) => setOptions({ ...options, task: v as Task })} />
+        <span className={styles.optionLabel}>Audio language</span>
+        <Select label="Audio language" options={LANGUAGE_OPTIONS} value={options.language} onChange={(v) => setOptions({ ...options, language: v })} />
       </div>
       <Switch
         label="Word timestamps"

@@ -360,13 +360,14 @@ func buildTranscriber(cfg config.TranscriberConfig, override app.Transcriber) ap
 		return fake.New(fake.Config{})
 	}
 	return whispercpp.New(whispercpp.Config{
-		Binary:       cfg.Binary,
-		ModelDir:     cfg.ModelDir,
-		DefaultModel: cfg.DefaultModel,
-		Threads:      cfg.Threads,
-		NoGPU:        cfg.NoGPU,
-		GPUDevice:    cfg.GPUDevice,
-		Timeout:      cfg.Timeout,
+		Binary:           cfg.Binary,
+		ModelDir:         cfg.ModelDir,
+		DefaultModel:     cfg.DefaultModel,
+		TranslationModel: cfg.TranslationModel,
+		Threads:          cfg.Threads,
+		NoGPU:            cfg.NoGPU,
+		GPUDevice:        cfg.GPUDevice,
+		Timeout:          cfg.Timeout,
 	})
 }
 

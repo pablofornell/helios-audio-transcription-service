@@ -4,6 +4,7 @@ import {
   displayStatus as computeDisplayStatus,
   formatBytes,
   formatDuration,
+  formatLanguages,
   formatTimestamp,
   secondsSince,
   type DisplayStatus,
@@ -171,9 +172,8 @@ function renderMeta(transcription: Transcription, status: DisplayStatus, stale: 
   }
 
   const segments: string[] = [];
-  segments.push(transcription.options.task === "translate" ? "translate" : "transcribe");
-  segments.push(transcription.options.model || "default model");
-  segments.push(transcription.options.language || "auto-detect");
+  segments.push(transcription.result?.model || transcription.options.model || "default model");
+  segments.push(formatLanguages(transcription));
   if (transcription.audio.durationSeconds > 0) segments.push(formatDuration(transcription.audio.durationSeconds));
   else if (transcription.audio.sizeBytes > 0) segments.push(formatBytes(transcription.audio.sizeBytes));
 

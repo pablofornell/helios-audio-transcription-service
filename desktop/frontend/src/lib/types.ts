@@ -35,7 +35,12 @@ export type ClientStatus = "canceling";
 /** `Status` plus the client-only states, for anything that renders a StatusPill. */
 export type DisplayStatus = Status | ClientStatus;
 
-/** Mirrors internal/domain.Task — what whisper-cli produces for a job. */
+/**
+ * Mirrors internal/domain.Task. A request may still carry a task, but the
+ * service ignores it: the output language follows the detected audio
+ * language (Spanish stays Spanish, English stays English, anything else is
+ * translated to English). `Result.task` reports what the engine did.
+ */
 export type Task = "transcribe" | "translate";
 
 /** Every transcript rendering this service's `/transcript` endpoint supports (docs/openapi.yaml's `TranscriptFormat`). */
@@ -82,8 +87,9 @@ export type ErrorCode =
 export interface Options {
   /** Whisper model name, "large-v3-turbo-q5_0". Empty means the configured default. */
   model: string;
-  /** ISO-639-1/639-2 code. Empty means auto-detect. */
+  /** Optional hint for the audio language (ISO-639-1/639-2 code). Empty means auto-detect. A hint skips detection; it does not set the output language. */
   language: string;
+  /** Sent for compatibility. The service ignores it. */
   task: Task;
   wordTimestamps: boolean;
   initialPrompt: string;
@@ -122,7 +128,10 @@ export interface Segment {
 /** Mirrors internal/domain.Result field for field — the finished transcript of a succeeded job. */
 export interface Result {
   text: string;
+  /** Language spoken in the audio: detected, or the caller's hint. */
   language: string;
+  /** Language of `text`: "es" for Spanish audio, "en" for all other audio. Absent on results stored before this field existed. */
+  outputLanguage?: string;
   durationSeconds: number;
   model: string;
   task: Task;

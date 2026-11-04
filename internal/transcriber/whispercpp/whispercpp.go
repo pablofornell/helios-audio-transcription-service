@@ -19,6 +19,13 @@
 // extra, never-actually-emitted pattern costs nothing and keeps this
 // package correct if a future whisper.cpp release changes its convention
 // or a differently-built vocab file introduces such a token.
+//
+// Transcribe runs two whisper-cli processes when the caller gives no
+// language hint. The first one detects the language (-dl, see
+// detectLanguage); domain.PlanOutput turns the result into the output
+// language; the second one transcribes or translates. -dl and -tr were
+// checked on the v1.9.4 tag: both exist, and -dl prints
+// "auto-detected language: <code> (p = <prob>)" on stderr.
 package whispercpp
 
 import "time"
@@ -35,6 +42,10 @@ const (
 	defaultThreads = 4
 	defaultTimeout = 30 * time.Minute
 )
+
+// DefaultTranslationModel is used when Config.TranslationModel is empty.
+// Real values come from internal/config (HELIOS_TRANSCRIBER_TRANSLATION_MODEL).
+const DefaultTranslationModel = "large-v3-q5_0"
 
 // Config configures a Transcriber.
 type Config struct {
@@ -53,6 +64,13 @@ type Config struct {
 	// from config.TranscriberConfig.DefaultModel, which Config.Validate
 	// already requires to be non-empty.
 	DefaultModel string
+	// TranslationModel is the model that translates audio in a third
+	// language (not Spanish, not English) to English. The turbo model
+	// cannot translate. Available does NOT check this file: a deploy
+	// without it must still start and be ready, because Spanish and
+	// English jobs do not need it. Transcribe checks it only for a job that
+	// does. Defaults to DefaultTranslationModel.
+	TranslationModel string
 	// Threads is the -t value passed to whisper-cli. Defaults to
 	// defaultThreads.
 	Threads int
@@ -63,8 +81,9 @@ type Config struct {
 	// GPUDevice is the --device index when NoGPU is false. Defaults to 0.
 	GPUDevice int
 	// Timeout is the hard ceiling on any single Transcribe call, enforced
-	// regardless of what the caller's ctx allows — see command in
-	// process.go. Defaults to defaultTimeout.
+	// regardless of what the caller's ctx allows — see Transcribe. The
+	// ceiling covers language detection and transcription together.
+	// Defaults to defaultTimeout.
 	Timeout time.Duration
 }
 
@@ -80,6 +99,9 @@ type Transcriber struct {
 func New(cfg Config) *Transcriber {
 	if cfg.Binary == "" {
 		cfg.Binary = DefaultBinary
+	}
+	if cfg.TranslationModel == "" {
+		cfg.TranslationModel = DefaultTranslationModel
 	}
 	if cfg.Threads <= 0 {
 		cfg.Threads = defaultThreads

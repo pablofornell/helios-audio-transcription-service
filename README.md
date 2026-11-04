@@ -3,7 +3,9 @@
 **HELIOS-ATS** (Audio Transcription Service) accepts an audio file upload, stores it,
 and asynchronously produces a precise transcript using **whisper.cpp** — segments,
 word-level timestamps, language auto-detection and translation to English are all
-supported. Helios is this organisation's domain for data extraction and manipulation
+supported. The transcript language follows one rule: Spanish audio gives a Spanish
+transcript, and audio in any other language gives an English one (see
+[Transcript language](#transcript-language)). Helios is this organisation's domain for data extraction and manipulation
 in general; ATS is this one service inside that domain, not the domain itself — the
 compound name keeps the two apart. It ships as a single Go binary: a REST API plus a
 Postgres-backed job queue and worker pool, in one process.
@@ -101,6 +103,7 @@ curl -s localhost:7462/api/v1/transcriptions/7e3c2c1a-9e0b-4f2a-8a3a-1a2b3c4d5e6
   "result": {
     "text": "Thanks for joining me today. Let's start with...",
     "language": "en",
+    "outputLanguage": "en",
     "durationSeconds": 214.32,
     "model": "large-v3-turbo-q5_0",
     "task": "transcribe",
@@ -136,6 +139,7 @@ export the variables directly for `go run`/`make run`. The ones worth knowing up
 | `HELIOS_TRANSCRIBER_NO_GPU` | `false` | GPU takes priority by default. Set `true` to force CPU transcription (`--no-gpu`). |
 | `HELIOS_TRANSCRIBER_GPU_DEVICE` | `0` | Nonnegative whisper-cli GPU index (`--device`), ignored in CPU mode. |
 | `HELIOS_TRANSCRIBER_ALLOWED_MODELS` | `large-v3-turbo-q5_0` | Only `large-v3-turbo-q5_0` is supported; configuration rejects other names. |
+| `HELIOS_TRANSCRIBER_TRANSLATION_MODEL` | `large-v3-q5_0` | Internal model that translates audio in a third language to English. Not a request option. The service does not need its file to start or to be ready. |
 | `HELIOS_WORKER_CONCURRENCY` | `2` | How many transcriptions run at once per process. |
 | `HELIOS_AUDIO_MAX_DURATION` | `4h` | Audio longer than this is rejected (at probe time — see `docs/ARCHITECTURE.md`). |
 | `HELIOS_RETENTION_MAX_AGE` | `168h` (7 days) | How old a terminal (succeeded/failed/canceled) transcription must be before the retention sweep deletes it — database row and files both. See `docs/RUNBOOK.md`. |
@@ -167,9 +171,30 @@ and queues it, then a worker in the same process runs the actual pipeline. Poll
 
 **Model weights are provisioned separately.** Only `large-v3-turbo-q5_0` is
 supported for new submissions. Run `make models` to fetch
-`ggml-large-v3-turbo-q5_0.bin`; see `docs/RUNBOOK.md`'s **Prerequisites**.
-Missing default weights make the service unready. Other model names are rejected
-as invalid input. Existing jobs and transcripts retain their recorded model names.
+`ggml-large-v3-turbo-q5_0.bin` and `ggml-large-v3-q5_0.bin`; see
+`docs/RUNBOOK.md`'s **Prerequisites**. Missing default weights make the service
+unready. Missing translation weights do not: only a job with audio in a third
+language fails, with `model_unavailable`. Other model names are rejected as invalid
+input. Existing jobs and transcripts retain their recorded model names.
+
+<a id="transcript-language"></a>
+**Transcript language.** The service detects the audio language before it
+transcribes, then applies one rule:
+
+| Audio language | Transcript | Model |
+|---|---|---|
+| Spanish (`es`) | Spanish. Never translated. | `large-v3-turbo-q5_0` |
+| English (`en`) | English. | `large-v3-turbo-q5_0` |
+| Any other language | English, translated. | `large-v3-q5_0` |
+
+`options.language` is an optional hint for the audio language. A hint skips
+detection but does not choose the output: a hint of `es` gives Spanish text, a hint of
+`fr` gives English text. `options.task` is still accepted but ignored: `task=translate`
+on Spanish audio gives a Spanish transcript. The `result` carries `language` (the
+language of the audio), `outputLanguage` (the language of `text`), `model` (the model
+that produced the text) and `task` (what the engine did). Detection reads the first
+30 seconds of audio, so a file that changes language later keeps the language of its
+start. Detection loads the model once more, so each job takes a few seconds longer.
 
 **Speaker diarization is out of scope.** ATS produces segments and, optionally,
 word-level timestamps — never speaker labels. There is also no authentication layer:

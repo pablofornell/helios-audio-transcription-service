@@ -167,6 +167,7 @@ export namespace main {
 	export class ResultDTO {
 	    text: string;
 	    language: string;
+	    outputLanguage?: string;
 	    durationSeconds: number;
 	    model: string;
 	    task: string;
@@ -180,6 +181,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.text = source["text"];
 	        this.language = source["language"];
+	        this.outputLanguage = source["outputLanguage"];
 	        this.durationSeconds = source["durationSeconds"];
 	        this.model = source["model"];
 	        this.task = source["task"];

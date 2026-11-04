@@ -22,16 +22,16 @@ const (
 	whisperDefaultTemperature = 0.0
 )
 
-// buildArgs builds whisper-cli's argument vector for one Transcribe call,
+// buildArgs builds whisper-cli's argument vector for one transcription run,
 // exactly as CONTRACT.md section 8 specifies (flag spellings verified live
 // against the current whisper-cli --help — see whispercpp.go's package
 // doc).
-func buildArgs(cfg Config, req domain.TranscribeRequest, modelPath, outBase string) []string {
-	lang := req.Options.Language
-	if req.Options.AutoDetectLanguage() {
-		lang = "auto"
-	}
-
+//
+// lang is always a real language code, never "auto": Transcribe detects the
+// language first (see detectLanguage) or takes the caller's hint. translate
+// comes from domain.PlanOutput, never from Options.Task. -tr appears only
+// when translate is true, so Spanish audio can never get it.
+func buildArgs(cfg Config, req domain.TranscribeRequest, lang string, translate bool, modelPath, outBase string) []string {
 	jsonFlag := "-oj"
 	if req.Options.WordTimestamps {
 		jsonFlag = "-ojf"
@@ -46,13 +46,9 @@ func buildArgs(cfg Config, req domain.TranscribeRequest, modelPath, outBase stri
 		"-l", lang,
 	}
 
-	if cfg.NoGPU {
-		args = append(args, "--no-gpu")
-	} else {
-		args = append(args, "--device", strconv.Itoa(cfg.GPUDevice))
-	}
+	args = append(args, deviceArgs(cfg)...)
 
-	if req.Options.Task == domain.TaskTranslate {
+	if translate {
 		args = append(args, "-tr")
 	}
 	if req.Options.InitialPrompt != "" {
@@ -67,4 +63,30 @@ func buildArgs(cfg Config, req domain.TranscribeRequest, modelPath, outBase stri
 
 	args = append(args, "--no-prints")
 	return args
+}
+
+// buildDetectArgs builds the argument vector for the language detection
+// run: -dl makes whisper-cli exit after it detects the language. The run
+// reads the same audio file as the transcription run, writes no output
+// file, and reports the language on stderr.
+//
+// It must NOT pass --no-prints. That flag turns off whisper.cpp's log, and
+// the "auto-detected language" line is a log line (verified on v1.9.4, see
+// testdata/detect_language_jfk_tiny_no_prints.stderr).
+func buildDetectArgs(cfg Config, audioPath, modelPath string) []string {
+	args := []string{
+		"-m", modelPath,
+		"-f", audioPath,
+		"-t", strconv.Itoa(cfg.Threads),
+		"-dl",
+	}
+	return append(args, deviceArgs(cfg)...)
+}
+
+// deviceArgs returns the flags that pick CPU or GPU for one run.
+func deviceArgs(cfg Config) []string {
+	if cfg.NoGPU {
+		return []string{"--no-gpu"}
+	}
+	return []string{"--device", strconv.Itoa(cfg.GPUDevice)}
 }

@@ -37,9 +37,9 @@ describe("useComposerOptions", () => {
   it.each(["tiny", "base", "small", "medium", "large-v3", "large-v3-turbo", "unknown"])(
     "migrates retired persisted model %s to the server default without losing other options",
     (model) => {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ model, language: "es", task: "translate", wordTimestamps: true }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ model, language: "es", wordTimestamps: true }));
       const { result } = renderHook(() => useComposerOptions());
-      expect(result.current.options).toEqual({ ...DEFAULT_OPTIONS, language: "es", task: "translate", wordTimestamps: true });
+      expect(result.current.options).toEqual({ ...DEFAULT_OPTIONS, language: "es", wordTimestamps: true });
       expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!).model).toBe(DEFAULT_OPTIONS.model);
     },
   );
@@ -47,7 +47,7 @@ describe("useComposerOptions", () => {
   it("reset() returns to the documented defaults and clears isDefault's false state", () => {
     const { result } = renderHook(() => useComposerOptions());
     act(() => {
-      result.current.setOptions({ ...result.current.options, task: "translate" });
+      result.current.setOptions({ ...result.current.options, language: "fr" });
     });
     expect(result.current.isDefault).toBe(false);
 
@@ -64,10 +64,11 @@ describe("useComposerOptions", () => {
     expect(result.current.options).toEqual(DEFAULT_OPTIONS);
   });
 
-  it("ignores an invalid persisted task rather than trusting it verbatim", () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ task: "not-a-real-task", model: SUPPORTED_MODEL }));
+  it("drops a saved task: the server ignores it and the composer always sends transcribe", () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ task: "translate", language: "es", model: SUPPORTED_MODEL }));
     const { result } = renderHook(() => useComposerOptions());
     expect(result.current.options.task).toBe("transcribe");
+    expect(result.current.options.language).toBe("es");
     expect(result.current.options.model).toBe(SUPPORTED_MODEL);
   });
 });
