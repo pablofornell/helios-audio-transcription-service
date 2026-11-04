@@ -58,6 +58,24 @@ for (const status of ['pending', 'running', 'failed', 'canceled'] as const) {
   });
 }
 
+test('A later visit to the Library does not reopen the item from "View in Library"', async ({ page }) => {
+  const rows = [item('failed-once', 'failed'), item('done')]; await mockService(page, () => rows); await page.goto('/');
+  await page.getByText('failed-once.wav', { exact: true }).dblclick();
+  await expect(page.getByRole('button', { name: 'Download audio', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Transcribe', exact: true }).click();
+  await page.getByRole('button', { name: 'Library', exact: true }).click();
+  await expect(page.getByText('done.wav', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Download audio', exact: true })).toHaveCount(0);
+});
+
+test('Queue keeps failed rows after Clear completed', async ({ page }) => {
+  const rows = [item('done'), item('failed-one', 'failed')]; await mockService(page, () => rows); await page.goto('/');
+  await page.getByRole('button', { name: 'Clear completed', exact: true }).click();
+  await expect(page.getByText('done.wav', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('failed-one.wav', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Clear completed', exact: true })).toHaveCount(0);
+});
+
 test('Open detail updates when a polled transcription completes', async ({ page }) => {
   let rows = [item('live', 'running')]; await mockService(page, () => rows); await page.goto('/');
   await page.getByText('live.wav', { exact: true }).dblclick();

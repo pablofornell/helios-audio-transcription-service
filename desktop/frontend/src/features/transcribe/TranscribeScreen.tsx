@@ -1,7 +1,8 @@
+import { useToast } from "../../components";
 import { Composer } from "./Composer";
 import { QueueList } from "./QueueList";
 import { useTranscribeQueue } from "./useTranscribeQueue";
-import { useConnection, useTranscriptions } from "../../lib";
+import { HeliosError, transcriptionStore, useConnection, useTranscriptions } from "../../lib";
 import { isLibraryEligible } from "../../lib/contentEligibility";
 import styles from "./TranscribeScreen.module.css";
 
@@ -16,7 +17,8 @@ export interface TranscribeScreenProps {
  * is this component's own implementation detail.
  */
 export function TranscribeScreen({ onOpenLibrary }: TranscribeScreenProps) {
-  const { transcriptions } = useTranscriptions();
+  const { transcriptions, hasMore, loadingMore } = useTranscriptions();
+  const toast = useToast();
   const connection = useConnection();
   const queue = useTranscribeQueue();
 
@@ -26,7 +28,14 @@ export function TranscribeScreen({ onOpenLibrary }: TranscribeScreenProps) {
   // defaulting to the docked bar over the full-surface takeover is the
   // safer guess either way.
   const expanded = !queue.loading && queue.rows.length === 0;
+  // The count covers the loaded rows. While older rows exist, it is a lower bound.
   const libraryCount = transcriptions.filter(isLibraryEligible).length;
+  const loadMore = () => {
+    transcriptionStore.loadMore().catch((err: unknown) => {
+      const heliosErr = err instanceof HeliosError ? err : new HeliosError("unknown", String(err));
+      toast.show({ message: `Couldn't load older transcriptions — ${heliosErr.message}` });
+    });
+  };
   const connectionStale = connection.status === "reconnecting";
 
   return (
@@ -48,6 +57,10 @@ export function TranscribeScreen({ onOpenLibrary }: TranscribeScreenProps) {
             clearFinished={queue.clearFinished}
             onOpenLibrary={onOpenLibrary}
             libraryCount={libraryCount}
+            libraryCountIsLowerBound={hasMore}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            onLoadMore={loadMore}
           />
         </div>
       ) : null}

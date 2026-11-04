@@ -72,7 +72,6 @@ func TestStoreLibraryListsFinishedItemsOnly(t *testing.T) {
 		return &v
 	}
 	res := result
-	jsonNull := "null"
 
 	// Every status, each with a result where the schema allows one.
 	pending := create(0, domain.StatusPending, &res, nil)
@@ -81,7 +80,6 @@ func TestStoreLibraryListsFinishedItemsOnly(t *testing.T) {
 	canceled := create(3, domain.StatusCanceled, &res, done(3))
 	// A succeeded row without a usable result is not finished.
 	noResult := create(4, domain.StatusSucceeded, nil, done(4))
-	nullResult := create(5, domain.StatusSucceeded, &jsonNull, done(5))
 	// Succeeded rows with stored audio are finished. The last one has no
 	// completion time.
 	oldest := create(6, domain.StatusSucceeded, &res, done(6))
@@ -104,7 +102,7 @@ func TestStoreLibraryListsFinishedItemsOnly(t *testing.T) {
 		_, err := testPool.Exec(ctx, "UPDATE transcriptions SET status='succeeded', result=$2::jsonb, completed_at=now() WHERE id=$1", tr.ID, result)
 		require.NoError(t, err)
 	}
-	for _, id := range []string{pending, running, failed, canceled, noResult, nullResult} {
+	for _, id := range []string{pending, running, failed, canceled, noResult} {
 		require.NotContains(t, libraryIDs(t, store, 100), id)
 	}
 
@@ -140,9 +138,19 @@ func TestStoreLibraryListsFinishedItemsOnly(t *testing.T) {
 	// The default listing still returns every status, and single reads work.
 	defaultPage, err := store.List(ctx, ListFilter{Limit: 100})
 	require.NoError(t, err)
-	require.Len(t, defaultPage.Items, 14)
+	require.Len(t, defaultPage.Items, 13)
 	for _, id := range []string{pending, running, failed, canceled, noResult} {
 		_, err := store.Get(ctx, id)
 		require.NoError(t, err)
 	}
+}
+
+// The Library query tests for SQL NULL only. This test proves that Finish
+// cannot store JSON null: pgx writes a nil *domain.Result as SQL NULL.
+func TestNilResultIsWrittenAsSQLNull(t *testing.T) {
+	requireDocker(t)
+	var result *domain.Result
+	var isNull bool
+	require.NoError(t, testPool.QueryRow(context.Background(), "SELECT $1::jsonb IS NULL", result).Scan(&isNull))
+	require.True(t, isNull)
 }

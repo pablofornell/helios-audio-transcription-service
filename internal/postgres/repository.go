@@ -136,7 +136,10 @@ func (s *Store) List(ctx context.Context, f ListFilter) (Page, error) {
 	// its rank field so that cursors from earlier versions still decode.
 	const libraryTimeSQL = "COALESCE(completed_at, created_at)"
 	if f.Library {
-		query += " AND status = 'succeeded' AND result IS NOT NULL AND result <> 'null'::jsonb"
+		// Test for SQL NULL only. A comparison with JSON null reads every stored
+		// transcript. The write path never stores JSON null (see Finish), and
+		// the client also drops an item without a result.
+		query += " AND status = 'succeeded' AND result IS NOT NULL"
 		query += " AND btrim(source_path) <> '' AND btrim(audio->>'filename') <> '' AND (audio->>'sizeBytes')::bigint > 0"
 	}
 	// A cursor with a rank below 2 points into the old active section. That

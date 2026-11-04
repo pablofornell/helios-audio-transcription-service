@@ -180,3 +180,20 @@ describe("LibraryScreen — finished items only", () => {
     expect(screen.queryByText("old.wav")).not.toBeInTheDocument();
   });
 });
+
+describe("LibraryScreen — open hand-off", () => {
+  it("reports once that it took the open id, and not when none was given", async () => {
+    get.mockResolvedValue(row("failed-one"));
+    const consumed = vi.fn();
+    const view = render(<LibraryScreen onOpenIdConsumed={consumed} />);
+    expect(consumed).not.toHaveBeenCalled();
+    view.rerender(<LibraryScreen openId="failed-one" onOpenIdConsumed={consumed} />);
+    await waitFor(() => expect(screen.getByTestId("detail-id")).toHaveTextContent("failed-one"));
+    expect(consumed).toHaveBeenCalledTimes(1);
+    // The shell clears the id. The open detail stays and nothing opens again.
+    view.rerender(<LibraryScreen onOpenIdConsumed={consumed} />);
+    expect(screen.getByTestId("detail-id")).toHaveTextContent("failed-one");
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(consumed).toHaveBeenCalledTimes(1);
+  });
+});
